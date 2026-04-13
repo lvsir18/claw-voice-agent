@@ -28,6 +28,9 @@
 ### 前端和主集成层
 
 - `services/webchat/server.py`
+- `frontend/index.html`
+- `frontend/styles.css`
+- `frontend/app.js`
 
 这里面同时包含：
 - 网页 UI
@@ -37,7 +40,10 @@
 - `/api/tts`
 - `/api/wake-check`
 
-如果要改 UI、状态机、录音交互、唤醒流程可视化，先看这里。
+如果要改 UI、状态机、录音交互、唤醒流程可视化：
+
+- 优先改 `frontend/` 下的三个文件
+- `services/webchat/server.py` 主要负责接口和集成
 
 ### 本地 TTS
 
