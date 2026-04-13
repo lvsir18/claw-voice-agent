@@ -1,6 +1,8 @@
 # Claw Voice Agent
 
-一个本地语音 Agent 项目，当前主链路是：
+一个本地语音 Agent 项目。
+
+当前主链路：
 
 - 唤醒词进入对话
 - 浏览器录音 / 音频上传
@@ -8,17 +10,72 @@
 - 本地 LLM 回复
 - 本地 / API 可切换 TTS
 
-## 当前技术栈
+## 当前运行格式
+
+当前代码是按下面的结构组织的：
+
+```text
+.
+├── README.md
+├── frontend/
+│   ├── index.html
+│   ├── styles.css
+│   └── app.js
+├── services/
+│   ├── webchat/
+│   │   └── server.py
+│   ├── wake/
+│   │   ├── sherpa_kws_server.py
+│   │   └── wake_keywords.txt
+│   ├── tts/
+│   │   └── cosyvoice_server.py
+│   ├── asr/
+│   └── agent/
+└── deploy/
+    ├── config/
+    │   └── openclaw.json.example
+    └── systemd/
+```
+
+## 当前使用的模型和组件
 
 - Agent runtime: `OpenClaw`
-- LLM: `Qwen2.5-7B-Instruct`
 - LLM serving: `vLLM`
-- ASR: `faster-whisper large-v3`
-- Local TTS: `CosyVoice-300M-SFT`
+- LLM model: `Qwen2.5-7B-Instruct`
+- ASR model: `faster-whisper large-v3`
+- Local TTS model: `CosyVoice-300M-SFT`
 - API TTS fallback: `Microsoft edge-tts`
 - Wake word:
   - 当前稳定主路径：中文固定词走本地 ASR 唤醒
   - `sherpa-kws` 已接入，继续调优
+
+## 当前服务关系
+
+```text
+frontend/
+  -> services/webchat/server.py
+  -> /api/wake-check
+  -> /api/transcribe
+  -> /api/chat
+  -> /api/tts
+
+/api/wake-check
+  -> sherpa-kws
+  -> or ASR fallback
+
+/api/transcribe
+  -> faster-whisper
+
+/api/chat
+  -> OpenClaw
+  -> localqwen
+  -> vLLM
+  -> Qwen2.5-7B-Instruct
+
+/api/tts
+  -> CosyVoice-300M-SFT
+  -> or Microsoft edge-tts
+```
 
 ## 代码划分
 
@@ -112,11 +169,3 @@ Agent / LLM 相关入口。
 - systemd service 模板
 - 配置模板
 - 部署相关文件
-
-## 当前最重要的入口
-
-- 改 UI：`frontend/`
-- 改集成逻辑：`services/webchat/server.py`
-- 改唤醒词：`services/wake/`
-- 改 TTS：`services/tts/`
-- 改部署：`deploy/`
