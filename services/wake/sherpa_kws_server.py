@@ -8,7 +8,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import numpy as np
 
-PYDEPS = "/home/aa-3090/.openclaw/sherpa-kws-pydeps"
+from pathlib import Path
+
+OPENCLAW_HOME = Path(os.environ.get("OPENCLAW_HOME", str(Path.home() / ".openclaw")))
+PYDEPS = os.environ.get("SHERPA_KWS_PYDEPS", str(OPENCLAW_HOME / "sherpa-kws-pydeps"))
 if PYDEPS not in sys.path:
     sys.path.insert(0, PYDEPS)
 
@@ -18,11 +21,11 @@ HOST = "127.0.0.1"
 PORT = int(os.environ.get("SHERPA_KWS_PORT", "9462"))
 MODEL_DIR = os.environ.get(
     "SHERPA_KWS_MODEL_DIR",
-    "/home/aa-3090/.openclaw/sherpa-kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20",
+    str(OPENCLAW_HOME / "sherpa-kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20"),
 )
 KEYWORDS_FILE = os.environ.get(
     "SHERPA_KWS_KEYWORDS_FILE",
-    "/home/aa-3090/.openclaw/sherpa-kws/wake_keywords.txt",
+    str(OPENCLAW_HOME / "sherpa-kws/wake_keywords.txt"),
 )
 TARGET_PHRASE = os.environ.get("SHERPA_KWS_TARGET_PHRASE", "机器人你好")
 

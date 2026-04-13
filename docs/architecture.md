@@ -10,7 +10,7 @@
 - LLM 推理
 - 回复 TTS 合成与播放
 
-当前实际运行主机是 `pro600`，局域网地址为 `192.168.12.50`。
+当前实际运行主机是部署机，局域网地址请按你的实际环境配置。
 
 ## 2. 总体架构
 
@@ -56,7 +56,7 @@ flowchart LR
 ### 3.3 Agent
 
 - 当前网页入口默认使用的 agent：`localqwen`
-- workspace：`/home/aa-3090/.openclaw/workspace-localqwen`
+- workspace：`$OPENCLAW_HOME/workspace-localqwen`
 - model：`vllm/qwen-local`
 
 说明：
@@ -203,8 +203,8 @@ LLM reply text
 
 ### 局域网其他设备
 
-- URL：`https://192.168.12.50:18443/chat?session=main`
-- 输入 `gateway token` 后接入
+- URL：`https://YOUR-LAN-HOST:18443/chat?session=main`
+- 输入你自己配置的 `gateway token` 后接入
 
 注意：
 

@@ -5,13 +5,14 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/python3 /home/aa-3090/.openclaw/webchat/server.py
+Environment=OPENCLAW_HOME=/home/YOUR_USER/.openclaw
+ExecStart=/usr/bin/python3 /home/YOUR_USER/.openclaw/webchat/server.py
 Restart=always
 RestartSec=3
 Environment=OPENCLAW_WEBCHAT_PORT=18889
 Environment=OPENCLAW_WEBCHAT_AGENT=localqwen
-Environment=OPENCLAW_BIN=/home/aa-3090/.openclaw/bin/openclaw
-Environment=FW_WHISPER_BIN=/home/aa-3090/.openclaw/bin/fw-whisper
+Environment=OPENCLAW_BIN=/home/YOUR_USER/.openclaw/bin/openclaw
+Environment=FW_WHISPER_BIN=/home/YOUR_USER/.openclaw/bin/fw-whisper
 
 [Install]
 WantedBy=default.target

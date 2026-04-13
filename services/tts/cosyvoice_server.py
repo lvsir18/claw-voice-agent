@@ -7,8 +7,9 @@ from pathlib import Path
 
 import soundfile as sf
 
-ROOT = Path('/home/aa-3090/.openclaw/cosyvoice/CosyVoice')
-PYDEPS = '/home/aa-3090/.openclaw/cosyvoice-pydeps'
+OPENCLAW_HOME = Path(os.environ.get("OPENCLAW_HOME", str(Path.home() / ".openclaw")))
+ROOT = Path(os.environ.get("COSYVOICE_ROOT", str(OPENCLAW_HOME / "cosyvoice/CosyVoice")))
+PYDEPS = os.environ.get("COSYVOICE_PYDEPS", str(OPENCLAW_HOME / "cosyvoice-pydeps"))
 MATCHA = str(ROOT / 'third_party/Matcha-TTS')
 if PYDEPS not in sys.path:
     sys.path.insert(0, PYDEPS)
@@ -23,12 +24,12 @@ HOST = '127.0.0.1'
 PORT = int(os.environ.get('COSYVOICE_TTS_PORT', '9461'))
 MODEL_DIR = os.environ.get(
     'COSYVOICE_TTS_MODEL_DIR',
-    '/home/aa-3090/.openclaw/cosyvoice/models/CosyVoice-300M-SFT',
+    str(OPENCLAW_HOME / 'cosyvoice/models/CosyVoice-300M-SFT'),
 )
 PROMPT_TEXT = os.environ.get('COSYVOICE_TTS_PROMPT_TEXT', '希望你以后能够做的比我还好呦。')
 PROMPT_WAV = os.environ.get('COSYVOICE_TTS_PROMPT_WAV', str(ROOT / 'asset/zero_shot_prompt.wav'))
 SPEAKER = os.environ.get('COSYVOICE_TTS_SPEAKER', '中文女')
-OUT_DIR = Path(os.environ.get('COSYVOICE_TTS_OUT_DIR', '/home/aa-3090/.openclaw/cosyvoice/tts-out'))
+OUT_DIR = Path(os.environ.get('COSYVOICE_TTS_OUT_DIR', str(OPENCLAW_HOME / 'cosyvoice/tts-out')))
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL = AutoModel(model_dir=MODEL_DIR)

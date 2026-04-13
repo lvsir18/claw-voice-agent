@@ -15,21 +15,27 @@ import urllib.request
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
+OPENCLAW_HOME = pathlib.Path(
+    os.environ.get("OPENCLAW_HOME", str(pathlib.Path.home() / ".openclaw"))
+)
+OPENCLAW_PYTHON = os.environ.get("OPENCLAW_PYTHON", sys.executable)
+COSYVOICE_PYDEPS = os.environ.get("COSYVOICE_PYDEPS", str(OPENCLAW_HOME / "cosyvoice-pydeps"))
+
 HOST = "0.0.0.0"
 PORT = int(os.environ.get("OPENCLAW_WEBCHAT_PORT", "18889"))
-OPENCLAW_BIN = os.environ.get("OPENCLAW_BIN", "/home/aa-3090/.openclaw/bin/openclaw")
+OPENCLAW_BIN = os.environ.get("OPENCLAW_BIN", str(OPENCLAW_HOME / "bin/openclaw"))
 ASR_URL = os.environ.get("OPENCLAW_WEBCHAT_ASR_URL", "http://127.0.0.1:9460/transcribe")
 COSYVOICE_TTS_URL = os.environ.get("OPENCLAW_WEBCHAT_COSYVOICE_URL", "http://127.0.0.1:9461/synthesize")
 SHERPA_WAKE_URL = os.environ.get("OPENCLAW_WEBCHAT_SHERPA_WAKE_URL", "http://127.0.0.1:9462/check")
 AGENT_ID = os.environ.get("OPENCLAW_WEBCHAT_AGENT", "localqwen")
-DATA_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_DATA", "/home/aa-3090/.openclaw/webchat/data"))
-UPLOAD_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_UPLOADS", "/home/aa-3090/.openclaw/webchat/uploads"))
-TTS_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_TTS", "/home/aa-3090/.openclaw/webchat/tts"))
+DATA_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_DATA", str(OPENCLAW_HOME / "webchat/data")))
+UPLOAD_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_UPLOADS", str(OPENCLAW_HOME / "webchat/uploads")))
+TTS_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_TTS", str(OPENCLAW_HOME / "webchat/tts")))
 WEBCHAT_TOKEN = os.environ.get("OPENCLAW_WEBCHAT_TOKEN", "").strip()
 MAX_AUDIO_BYTES = 25 * 1024 * 1024
 TARGET_SAMPLE_RATE = 16000
-LOG_PATH = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_LOG", "/home/aa-3090/.openclaw/webchat/debug.log"))
-OPENCLAW_CONFIG_PATH = pathlib.Path(os.environ.get("OPENCLAW_CONFIG_PATH", "/home/aa-3090/.openclaw/openclaw.json"))
+LOG_PATH = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_LOG", str(OPENCLAW_HOME / "webchat/debug.log")))
+OPENCLAW_CONFIG_PATH = pathlib.Path(os.environ.get("OPENCLAW_CONFIG_PATH", str(OPENCLAW_HOME / "openclaw.json")))
 TLS_CERT_PATH = os.environ.get("OPENCLAW_WEBCHAT_TLS_CERT", "").strip()
 TLS_KEY_PATH = os.environ.get("OPENCLAW_WEBCHAT_TLS_KEY", "").strip()
 LOCK = threading.Lock()
@@ -1764,9 +1770,9 @@ def synthesize_tts_api(text, *, voice, request_id, client_id, session):
             "asyncio.run(main())\n"
         )
         env = os.environ.copy()
-        pydeps = "/home/aa-3090/.openclaw/cosyvoice-pydeps"
+        pydeps = COSYVOICE_PYDEPS
         env["PYTHONPATH"] = pydeps + (":" + env["PYTHONPATH"] if env.get("PYTHONPATH") else "")
-        cmd = ["/home/aa-3090/anaconda3/envs/torch290_cu128_py310/bin/python", "-c", script]
+        cmd = [OPENCLAW_PYTHON, "-c", script]
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120, env=env)
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip() or f"edge-tts failed: {proc.returncode}")

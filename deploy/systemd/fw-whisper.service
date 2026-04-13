@@ -5,8 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-Environment=PYTHONPATH=/home/aa-3090/.openclaw/asr-pydeps
-Environment=LD_LIBRARY_PATH=/home/aa-3090/anaconda3/envs/torch290_cu128_py310/lib
+Environment=OPENCLAW_HOME=/home/YOUR_USER/.openclaw
+Environment=PYTHONPATH=/home/YOUR_USER/.openclaw/asr-pydeps
+Environment=LD_LIBRARY_PATH=/path/to/python/env/lib
 Environment=HF_ENDPOINT=https://hf-mirror.com
 Environment=HF_HUB_DISABLE_XET=1
 Environment=FW_ASR_MODEL=large-v3
@@ -14,7 +15,7 @@ Environment=FW_ASR_DEVICE=cuda
 Environment=FW_ASR_COMPUTE_TYPE=float16
 Environment=FW_ASR_VAD=true
 Environment=FW_ASR_PORT=9460
-ExecStart=/home/aa-3090/anaconda3/envs/torch290_cu128_py310/bin/python /home/aa-3090/.openclaw/asr/faster_whisper_server.py
+ExecStart=/path/to/python /home/YOUR_USER/.openclaw/asr/faster_whisper_server.py
 Restart=always
 RestartSec=5
 
