@@ -1,3 +1,11 @@
 # deploy
 
-部署脚本、systemd 模板、证书与环境配置。
+部署相关文件都在这里：
+
+- `systemd/`
+- `config/`
+
+说明：
+
+- `systemd/` 里是模板，不是你机器的真实路径
+- `config/openclaw.json.example` 是示例，不包含真实 token
