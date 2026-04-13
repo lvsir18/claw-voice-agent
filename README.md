@@ -110,6 +110,22 @@ flowchart LR
 - [CLAW_AGENT_ARCHITECTURE.md](/Volumes/zzs2T/Agent/harness/CLAW_AGENT_ARCHITECTURE.md)
 - [TASK_EXECUTION_GUARDRAILS.md](/Volumes/zzs2T/Agent/harness/TASK_EXECUTION_GUARDRAILS.md)
 
+## 当前已回收到仓库的代码
+
+当前线上 `pro600` 上运行的核心代码已经回收到本仓库：
+
+- `services/webchat/server.py`
+- `services/tts/cosyvoice_server.py`
+- `services/wake/sherpa_kws_server.py`
+- `services/wake/wake_keywords.txt`
+- `deploy/systemd/*.service`
+- `deploy/config/openclaw.json.example`
+
+说明：
+
+- 这些文件是当前真实在线版本的回收结果。
+- `openclaw.json` 里的真实 token 和机器私有路径没有直接提交，而是整理成了示例模板。
+
 ## 推荐协作方式
 
 - 前端组只负责 UI、交互和状态可视化。

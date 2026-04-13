@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenClaw Voice Web Chat HTTPS
+After=network-online.target openclaw-webchat.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /home/aa-3090/.openclaw/webchat/server.py
+Restart=always
+RestartSec=3
+Environment=OPENCLAW_WEBCHAT_PORT=18443
+Environment=OPENCLAW_WEBCHAT_AGENT=localqwen
+Environment=OPENCLAW_BIN=/home/aa-3090/.openclaw/bin/openclaw
+Environment=FW_WHISPER_BIN=/home/aa-3090/.openclaw/bin/fw-whisper
+Environment=OPENCLAW_WEBCHAT_TLS_CERT=/home/aa-3090/.openclaw/webchat/certs/webchat.crt
+Environment=OPENCLAW_WEBCHAT_TLS_KEY=/home/aa-3090/.openclaw/webchat/certs/webchat.key
+
+[Install]
+WantedBy=default.target

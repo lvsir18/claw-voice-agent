@@ -1,0 +1,18 @@
+[Unit]
+Description=Sherpa ONNX Local Wake Word Service
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/aa-3090/anaconda3/envs/torch290_cu128_py310/bin/python /home/aa-3090/.openclaw/sherpa-kws/server.py
+Restart=always
+RestartSec=5
+Environment=SHERPA_KWS_PORT=9462
+Environment=SHERPA_KWS_MODEL_DIR=/home/aa-3090/.openclaw/sherpa-kws/sherpa-onnx-kws-zipformer-zh-en-3M-2025-12-20
+Environment=SHERPA_KWS_KEYWORDS_FILE=/home/aa-3090/.openclaw/sherpa-kws/wake_keywords.txt
+Environment="SHERPA_KWS_TARGET_PHRASE=机器人你好"
+Environment=PYTHONPATH=/home/aa-3090/.openclaw/sherpa-kws-pydeps
+
+[Install]
+WantedBy=default.target

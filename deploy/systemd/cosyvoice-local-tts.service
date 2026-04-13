@@ -1,0 +1,18 @@
+[Unit]
+Description=CosyVoice Local TTS
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/home/aa-3090/anaconda3/envs/torch290_cu128_py310/bin/python /home/aa-3090/.openclaw/cosyvoice/tts_server.py
+Restart=always
+RestartSec=5
+Environment=COSYVOICE_TTS_PORT=9461
+Environment=COSYVOICE_TTS_MODEL_DIR=/home/aa-3090/.openclaw/cosyvoice/models/CosyVoice-300M-SFT
+Environment=COSYVOICE_TTS_SPEAKER=中文女
+Environment=COSYVOICE_TTS_OUT_DIR=/home/aa-3090/.openclaw/cosyvoice/tts-out
+Environment=PYTHONPATH=/home/aa-3090/.openclaw/cosyvoice-pydeps:/home/aa-3090/.openclaw/cosyvoice/CosyVoice:/home/aa-3090/.openclaw/cosyvoice/CosyVoice/third_party/Matcha-TTS
+
+[Install]
+WantedBy=default.target
