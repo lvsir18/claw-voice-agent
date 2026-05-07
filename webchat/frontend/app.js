@@ -56,6 +56,10 @@
       currentRecordWakeTriggered: false,
       speakerStatus: null,
       speakerEnrollRecording: false,
+      speakerEnrollOpen: false,
+      speakerEnrollSamples: [],
+      speakerEnrollTargetSamples: 3,
+      speakerEnrollLevel: 0,
       lastSpeakerScore: null,
       lastSpeakerResult: "",
       lastSpeakerReason: "",
@@ -89,6 +93,16 @@
     const speakerStatusEl = $("speakerStatus");
     const speakerEnrollBtn = $("speakerEnrollBtn");
     const speakerRefreshBtn = $("speakerRefreshBtn");
+    const speakerEnrollModalEl = $("speakerEnrollModal");
+    const speakerEnrollCloseBtn = $("speakerEnrollCloseBtn");
+    const speakerEnrollCancelBtn = $("speakerEnrollCancelBtn");
+    const speakerEnrollRecordBtn = $("speakerEnrollRecordBtn");
+    const speakerEnrollSubmitBtn = $("speakerEnrollSubmitBtn");
+    const speakerEnrollPhraseEl = $("speakerEnrollPhrase");
+    const speakerEnrollProgressEl = $("speakerEnrollProgress");
+    const speakerEnrollHintEl = $("speakerEnrollHint");
+    const speakerEnrollLevelFillEl = $("speakerEnrollLevelFill");
+    const speakerEnrollLevelTextEl = $("speakerEnrollLevelText");
     const reloadBtn = $("reloadBtn");
     const newSessionBtn = $("newSessionBtn");
     const pipelineStepsEl = $("pipelineSteps");
@@ -225,6 +239,42 @@
         item.textContent = text;
         speakerStatusEl.appendChild(item);
       });
+    }
+
+    function renderSpeakerEnrollModal() {
+      speakerEnrollModalEl.classList.toggle("hidden", !state.speakerEnrollOpen);
+      speakerEnrollPhraseEl.textContent = state.wakePhrase || "你好";
+      const done = state.speakerEnrollSamples.length;
+      const total = state.speakerEnrollTargetSamples;
+      speakerEnrollProgressEl.textContent = `第 ${Math.min(done + 1, total)} / ${total} 遍，已完成 ${done} 遍`;
+      const pct = Math.max(0, Math.min(100, Math.round(state.speakerEnrollLevel * 100)));
+      speakerEnrollLevelFillEl.style.width = `${pct}%`;
+      speakerEnrollLevelTextEl.textContent = `${pct}%`;
+      speakerEnrollRecordBtn.disabled = state.speakerEnrollRecording || done >= total;
+      speakerEnrollSubmitBtn.disabled = state.speakerEnrollRecording || done < total;
+      speakerEnrollCloseBtn.disabled = state.speakerEnrollRecording;
+      speakerEnrollCancelBtn.disabled = state.speakerEnrollRecording;
+      if (done >= total) {
+        speakerEnrollHintEl.textContent = "已完成采样，点击“保存声纹”后才会写入身份样本。";
+      } else if (!state.speakerEnrollRecording) {
+        speakerEnrollHintEl.textContent = "点击“开始录本遍”，然后清楚说出上方唤醒词。";
+      }
+    }
+
+    function openSpeakerEnrollModal() {
+      if (!state.authenticated || state.speakerEnrollRecording) return;
+      state.speakerEnrollOpen = true;
+      state.speakerEnrollSamples = [];
+      state.speakerEnrollLevel = 0;
+      renderSpeakerEnrollModal();
+    }
+
+    function closeSpeakerEnrollModal() {
+      if (state.speakerEnrollRecording) return;
+      state.speakerEnrollOpen = false;
+      state.speakerEnrollSamples = [];
+      state.speakerEnrollLevel = 0;
+      renderSpeakerEnrollModal();
     }
 
     async function loadSpeakerStatus() {
@@ -480,7 +530,7 @@
       return null;
     }
 
-    async function recordSpeakerSample(durationMs = 3000) {
+    async function recordSpeakerSample(durationMs = 2500) {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           deviceId: state.selectedDeviceId ? { exact: state.selectedDeviceId } : undefined,
@@ -499,7 +549,12 @@
       silentGain.gain.value = 0;
       const chunks = [];
       processor.onaudioprocess = (event) => {
-        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+        const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
+        chunks.push(chunk);
+        let sum = 0;
+        for (let i = 0; i < chunk.length; i += 1) sum += chunk[i] * chunk[i];
+        state.speakerEnrollLevel = Math.min(1, Math.sqrt(sum / Math.max(1, chunk.length)) * 8);
+        renderSpeakerEnrollModal();
       };
       source.connect(processor);
       processor.connect(silentGain);
@@ -520,7 +575,7 @@
       return encodeWavBlobFromFloat32(samples, sampleRate);
     }
 
-    async function enrollSpeaker() {
+    async function enrollSpeakerLegacy() {
       if (!state.authenticated || state.speakerEnrollRecording) return;
       if (!navigator.mediaDevices?.getUserMedia) {
         statusEl.textContent = "当前浏览器不支持录音。";
@@ -558,6 +613,85 @@
       } finally {
         state.speakerEnrollRecording = false;
         updateAuthUi();
+        if (state.wakeEnabled && state.authenticated && !state.recording) scheduleWakeResume(900);
+      }
+    }
+
+    async function recordSpeakerEnrollPass() {
+      if (!state.authenticated || state.speakerEnrollRecording) return;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        statusEl.textContent = "当前浏览器不支持录音。";
+        return;
+      }
+      state.speakerEnrollRecording = true;
+      updateAuthUi();
+      renderSpeakerEnrollModal();
+      try {
+        await stopWakeListener();
+        const pass = state.speakerEnrollSamples.length + 1;
+        statusEl.textContent = `正在采集第 ${pass} 遍唤醒词...`;
+        speakerEnrollHintEl.textContent = `正在录第 ${pass} 遍，请说：${state.wakePhrase}`;
+        logProcess("开始采集声纹样本", `pass=${pass}\nwakePhrase=${state.wakePhrase}\nclientId=${state.clientId}`);
+        const blob = await recordSpeakerSample(2500);
+        state.speakerEnrollSamples.push(blob);
+        state.speakerEnrollLevel = 0;
+        statusEl.textContent = `第 ${pass} 遍已采集`;
+        renderSpeakerEnrollModal();
+      } catch (err) {
+        state.lastSpeakerResult = "注册失败";
+        state.lastSpeakerReason = err.message;
+        statusEl.textContent = `声纹采集失败：${err.message}`;
+        logProcess("声纹采集失败", err.message);
+        updateSpeakerUi();
+      } finally {
+        state.speakerEnrollRecording = false;
+        state.speakerEnrollLevel = 0;
+        updateAuthUi();
+        renderSpeakerEnrollModal();
+      }
+    }
+
+    async function enrollSpeaker() {
+      if (!state.authenticated || state.speakerEnrollRecording) return;
+      if (state.speakerEnrollSamples.length < state.speakerEnrollTargetSamples) {
+        openSpeakerEnrollModal();
+        return;
+      }
+      state.speakerEnrollRecording = true;
+      updateAuthUi();
+      renderSpeakerEnrollModal();
+      try {
+        statusEl.textContent = "正在保存声纹样本...";
+        let last = null;
+        for (let i = 0; i < state.speakerEnrollSamples.length; i += 1) {
+          last = await api("/api/speaker/enroll", {
+            method: "POST",
+            headers: {
+              "Content-Type": "audio/wav",
+              "X-Filename": `speaker-enroll-${Date.now()}-${i + 1}.wav`,
+              "X-Client-Id": state.clientId,
+              "X-Request-Id": makeId("speaker"),
+              "X-Session-Key": state.session,
+            },
+            body: state.speakerEnrollSamples[i],
+          });
+        }
+        state.lastSpeakerResult = "已注册";
+        state.lastSpeakerReason = "";
+        statusEl.textContent = `声纹注册成功，新增 ${state.speakerEnrollSamples.length} 段样本`;
+        logProcess("声纹注册成功", `speaker=${last?.speaker_id || "owner"}\nnumSamples=${last?.num_samples || 0}`);
+        closeSpeakerEnrollModal();
+        await loadSpeakerStatus();
+      } catch (err) {
+        state.lastSpeakerResult = "注册失败";
+        state.lastSpeakerReason = err.message;
+        statusEl.textContent = `声纹注册失败：${err.message}`;
+        logProcess("声纹注册失败", err.message);
+        updateSpeakerUi();
+      } finally {
+        state.speakerEnrollRecording = false;
+        updateAuthUi();
+        renderSpeakerEnrollModal();
         if (state.wakeEnabled && state.authenticated && !state.recording) scheduleWakeResume(900);
       }
     }
@@ -1229,6 +1363,10 @@
     refreshMicsBtn.addEventListener("click", () => refreshMicDevices());
     speakerEnrollBtn.addEventListener("click", () => enrollSpeaker());
     speakerRefreshBtn.addEventListener("click", () => loadSpeakerStatus());
+    speakerEnrollRecordBtn.addEventListener("click", () => recordSpeakerEnrollPass());
+    speakerEnrollSubmitBtn.addEventListener("click", () => enrollSpeaker());
+    speakerEnrollCancelBtn.addEventListener("click", () => closeSpeakerEnrollModal());
+    speakerEnrollCloseBtn.addEventListener("click", () => closeSpeakerEnrollModal());
     wakeToggleEl.addEventListener("change", async () => {
       state.wakeEnabled = !!wakeToggleEl.checked;
       if (state.wakeEnabled) {
@@ -1334,6 +1472,7 @@
     updateAuthUi();
     updateWakeUi();
     updateSpeakerUi();
+    renderSpeakerEnrollModal();
     refreshMicDevices();
     setSession(initial);
     resetProcess("页面已就绪");

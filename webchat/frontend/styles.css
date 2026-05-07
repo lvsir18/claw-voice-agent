@@ -72,6 +72,19 @@
     .speaker-panel__actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .speaker-status { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; color:var(--muted); font-size:12px; }
     .speaker-status span { border:1px solid rgba(255,255,255,.05); border-radius:10px; background:#0b0d12; padding:8px 10px; min-width:0; word-break:break-word; }
+    .modal { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:18px; background:rgba(5,7,10,.72); }
+    .modal__dialog { width:min(520px, 100%); border:1px solid var(--border); border-radius:14px; background:var(--panel); box-shadow:0 24px 80px rgba(0,0,0,.45); padding:16px; display:flex; flex-direction:column; gap:16px; }
+    .modal__head { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+    .modal__title { font-size:18px; font-weight:800; }
+    .modal__subtitle { color:var(--muted); font-size:12px; margin-top:4px; }
+    .modal__close { width:36px; height:36px; padding:0; display:grid; place-items:center; font-size:20px; }
+    .speaker-enroll { display:flex; flex-direction:column; gap:12px; }
+    .speaker-enroll__phrase { border:1px solid var(--border); border-radius:12px; background:#10131a; padding:14px; color:var(--muted); display:flex; align-items:center; justify-content:space-between; gap:12px; }
+    .speaker-enroll__phrase strong { color:var(--text); font-size:22px; font-weight:800; }
+    .speaker-enroll__progress { color:var(--text); font-weight:700; }
+    .speaker-enroll__hint { color:var(--muted); font-size:12px; min-height:18px; }
+    .speaker-enroll__meter { display:flex; align-items:center; gap:8px; }
+    .speaker-enroll__actions { display:flex; align-items:center; justify-content:flex-end; gap:8px; flex-wrap:wrap; }
     .meter { display:flex; align-items:center; gap:8px; min-width:220px; }
     .meter__bar { flex:1; height:10px; border-radius:999px; background:#0b0d12; border:1px solid var(--border); overflow:hidden; }
     .meter__fill { height:100%; width:0%; background:linear-gradient(90deg, #3dd9b3 0%, #ffd166 55%, #ff5c5c 100%); transition:width 80ms linear; }

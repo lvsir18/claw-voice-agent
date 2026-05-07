@@ -186,6 +186,34 @@
       </main>
     </div>
   </div>
+  <div id="speakerEnrollModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="speakerEnrollTitle">
+    <div class="modal__dialog">
+      <div class="modal__head">
+        <div>
+          <div id="speakerEnrollTitle" class="modal__title">注册声纹</div>
+          <div class="modal__subtitle">请按提示重复当前唤醒词，完成后才会保存为身份样本。</div>
+        </div>
+        <button id="speakerEnrollCloseBtn" class="modal__close" type="button" aria-label="关闭">×</button>
+      </div>
+      <div class="speaker-enroll">
+        <div class="speaker-enroll__phrase">
+          <span>请说：</span>
+          <strong id="speakerEnrollPhrase">你好</strong>
+        </div>
+        <div id="speakerEnrollProgress" class="speaker-enroll__progress">第 1 / 3 遍</div>
+        <div id="speakerEnrollHint" class="speaker-enroll__hint">点击“开始录本遍”，听到后自然说出唤醒词。</div>
+        <div class="speaker-enroll__meter">
+          <div class="meter__bar"><div id="speakerEnrollLevelFill" class="meter__fill"></div></div>
+          <div id="speakerEnrollLevelText" class="meter__text">0%</div>
+        </div>
+        <div class="speaker-enroll__actions">
+          <button id="speakerEnrollRecordBtn" class="accent2" type="button">开始录本遍</button>
+          <button id="speakerEnrollSubmitBtn" class="primary" type="button" disabled>保存声纹</button>
+          <button id="speakerEnrollCancelBtn" type="button">取消</button>
+        </div>
+      </div>
+    </div>
+  </div>
     <script src="/static/app.js"></script>
 
 </body>
