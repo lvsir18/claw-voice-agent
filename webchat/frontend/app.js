@@ -217,7 +217,9 @@
     }
 
     function formatSpeakerScore(score) {
-      return Number.isFinite(Number(score)) ? Number(score).toFixed(2) : "-";
+      if (score === null || score === undefined || score === "") return "-";
+      const value = Number(score);
+      return Number.isFinite(value) ? value.toFixed(2) : "-";
     }
 
     function updateSpeakerUi() {
