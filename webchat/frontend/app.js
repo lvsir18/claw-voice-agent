@@ -54,6 +54,11 @@
       wakeSilentGain: null,
       currentRecordAutoSend: false,
       currentRecordWakeTriggered: false,
+      speakerStatus: null,
+      speakerEnrollRecording: false,
+      lastSpeakerScore: null,
+      lastSpeakerResult: "",
+      lastSpeakerReason: "",
       autoStopOnSilence: false,
       recordStartedAt: 0,
       speechSeenAt: 0,
@@ -81,6 +86,9 @@
     const wakeToggleEl = $("wakeToggle");
     const wakePhraseInputEl = $("wakePhraseInput");
     const wakeStatusEl = $("wakeStatus");
+    const speakerStatusEl = $("speakerStatus");
+    const speakerEnrollBtn = $("speakerEnrollBtn");
+    const speakerRefreshBtn = $("speakerRefreshBtn");
     const reloadBtn = $("reloadBtn");
     const newSessionBtn = $("newSessionBtn");
     const pipelineStepsEl = $("pipelineSteps");
@@ -161,6 +169,8 @@
       sendBtn.disabled = blocked;
       uploadBtn.disabled = blocked;
       reloadBtn.disabled = blocked;
+      speakerEnrollBtn.disabled = blocked || state.speakerEnrollRecording;
+      speakerRefreshBtn.disabled = blocked || state.speakerEnrollRecording;
       statusEl.textContent = text;
     }
 
@@ -182,12 +192,56 @@
       reloadBtn.disabled = blocked;
       newSessionBtn.disabled = !state.authenticated;
       recordBtn.disabled = !state.authenticated;
+      speakerEnrollBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
+      speakerRefreshBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
     }
 
     function renderInputLevel() {
       const pct = Math.max(0, Math.min(100, Math.round(state.inputLevel * 100)));
       inputLevelFillEl.style.width = `${pct}%`;
       inputLevelTextEl.textContent = `${pct}%`;
+    }
+
+    function formatSpeakerScore(score) {
+      return Number.isFinite(Number(score)) ? Number(score).toFixed(2) : "-";
+    }
+
+    function updateSpeakerUi() {
+      const status = state.speakerStatus || {};
+      const enabledText = status.enabled ? "已开启" : "已关闭";
+      const speakerId = status.speaker_id || "owner";
+      const samples = Number.isFinite(Number(status.num_samples)) ? Number(status.num_samples) : 0;
+      const result = state.lastSpeakerResult || (status.has_profile ? "-" : "未注册");
+      const reason = state.lastSpeakerReason ? `（${state.lastSpeakerReason}）` : "";
+      speakerStatusEl.innerHTML = "";
+      [
+        `声纹验证：${enabledText}`,
+        `当前身份：${speakerId}`,
+        `注册样本数：${samples}`,
+        `最近验证分数：${formatSpeakerScore(state.lastSpeakerScore)}`,
+        `最近验证结果：${result}${reason}`,
+      ].forEach((text) => {
+        const item = document.createElement("span");
+        item.textContent = text;
+        speakerStatusEl.appendChild(item);
+      });
+    }
+
+    async function loadSpeakerStatus() {
+      if (!state.authenticated) {
+        updateSpeakerUi();
+        return;
+      }
+      try {
+        const data = await api("/api/speaker/status");
+        state.speakerStatus = data;
+        if (!data.has_profile && !state.lastSpeakerResult) state.lastSpeakerResult = "未注册";
+        updateSpeakerUi();
+      } catch (err) {
+        state.lastSpeakerResult = "状态获取失败";
+        state.lastSpeakerReason = err.message;
+        updateSpeakerUi();
+      }
     }
 
     function normalizeWakeText(text) {
@@ -395,7 +449,7 @@
       const reqId = makeId("wake");
       const headers = {
         "Content-Type": blob.type || "application/octet-stream",
-        "X-Filename": `wake-${Date.now()}.webm`,
+        "X-Filename": `wake-${Date.now()}.wav`,
         "X-Wake-Language": wakeLanguageCode(),
         "X-Wake-Phrase-B64": base64Utf8(state.wakePhrase),
         "X-Client-Id": state.clientId,
@@ -407,11 +461,105 @@
         headers,
         body: blob,
       });
+      state.lastSpeakerScore = data.speaker_score ?? state.lastSpeakerScore;
+      state.lastSpeakerResult = data.speaker_enabled
+        ? (data.speaker_matched ? "通过" : (data.speaker_reason === "speaker profile not enrolled" ? "未注册" : "未通过"))
+        : "已关闭";
+      state.lastSpeakerReason = data.speaker_reason || "";
+      updateSpeakerUi();
+      if (data.wake_matched && !data.speaker_matched) {
+        const hint = data.speaker_reason === "speaker profile not enrolled" ? "请先注册声纹" : "身份确认失败";
+        statusEl.textContent = `唤醒词命中，但${hint}`;
+        logProcess("唤醒词命中但身份确认失败", `${data.speaker_reason || ""}\nscore=${formatSpeakerScore(data.speaker_score)}\nrequestId=${reqId}`);
+        return null;
+      }
       if (data.matched) {
         logProcess("唤醒词分片命中", `${data.text || ""}\nrequestId=${reqId}`);
-        return data.text || "";
+        return data;
       }
-      return "";
+      return null;
+    }
+
+    async function recordSpeakerSample(durationMs = 3000) {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          deviceId: state.selectedDeviceId ? { exact: state.selectedDeviceId } : undefined,
+          channelCount: 1,
+          noiseSuppression: true,
+          echoCancellation: true,
+          autoGainControl: true,
+        },
+      });
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      const context = new AudioContextCtor();
+      const sampleRate = context.sampleRate || 16000;
+      const source = context.createMediaStreamSource(stream);
+      const processor = context.createScriptProcessor(4096, 1, 1);
+      const silentGain = context.createGain();
+      silentGain.gain.value = 0;
+      const chunks = [];
+      processor.onaudioprocess = (event) => {
+        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+      };
+      source.connect(processor);
+      processor.connect(silentGain);
+      silentGain.connect(context.destination);
+      await new Promise((resolve) => setTimeout(resolve, durationMs));
+      try { processor.disconnect(); } catch {}
+      try { source.disconnect(); } catch {}
+      try { silentGain.disconnect(); } catch {}
+      stream.getTracks().forEach((track) => track.stop());
+      try { await context.close(); } catch {}
+      const total = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+      const samples = new Float32Array(total);
+      let offset = 0;
+      for (const chunk of chunks) {
+        samples.set(chunk, offset);
+        offset += chunk.length;
+      }
+      return encodeWavBlobFromFloat32(samples, sampleRate);
+    }
+
+    async function enrollSpeaker() {
+      if (!state.authenticated || state.speakerEnrollRecording) return;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        statusEl.textContent = "当前浏览器不支持录音。";
+        return;
+      }
+      state.speakerEnrollRecording = true;
+      updateAuthUi();
+      try {
+        await stopWakeListener();
+        statusEl.textContent = "正在注册声纹，请自然说话约 3 秒...";
+        logProcess("开始注册声纹", `clientId=${state.clientId}`);
+        const blob = await recordSpeakerSample(3000);
+        const data = await api("/api/speaker/enroll", {
+          method: "POST",
+          headers: {
+            "Content-Type": "audio/wav",
+            "X-Filename": `speaker-enroll-${Date.now()}.wav`,
+            "X-Client-Id": state.clientId,
+            "X-Request-Id": makeId("speaker"),
+            "X-Session-Key": state.session,
+          },
+          body: blob,
+        });
+        state.lastSpeakerResult = "已注册";
+        state.lastSpeakerReason = "";
+        statusEl.textContent = `声纹注册成功，样本数：${data.num_samples || 0}`;
+        logProcess("声纹注册成功", `speaker=${data.speaker_id || "owner"}\nnumSamples=${data.num_samples || 0}`);
+        await loadSpeakerStatus();
+      } catch (err) {
+        state.lastSpeakerResult = "注册失败";
+        state.lastSpeakerReason = err.message;
+        statusEl.textContent = `声纹注册失败：${err.message}`;
+        logProcess("声纹注册失败", err.message);
+        updateSpeakerUi();
+      } finally {
+        state.speakerEnrollRecording = false;
+        updateAuthUi();
+        if (state.wakeEnabled && state.authenticated && !state.recording) scheduleWakeResume(900);
+      }
     }
 
     async function flushWakeChunkIfReady() {
@@ -421,8 +569,9 @@
       try {
         const samples = takeWakeChunk(minSamples);
         const wavBlob = encodeWavBlobFromFloat32(samples, state.wakeChunkSampleRate);
-        const chunkText = await checkWakeWord(wavBlob);
-        if (!chunkText) return;
+        const wakeResult = await checkWakeWord(wavBlob);
+        if (!wakeResult) return;
+        const chunkText = wakeResult.text || "";
         const normalized = normalizeWakeText(chunkText);
         const target = normalizeWakeText(state.wakePhrase);
         if (!target || !normalized.includes(target)) return;
@@ -581,7 +730,7 @@
       }
       if (state.lastWakeProbe) {
         wakeProofEl.classList.remove("hidden");
-        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
+        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
       } else {
         wakeProofEl.classList.add("hidden");
         wakeProofMetaEl.textContent = "";
@@ -721,11 +870,23 @@
           ts: wake.ts,
           engine: wake.engine,
           matched: !!wake.matched,
+          wakeMatched: !!wake.wakeMatched,
+          speakerMatched: !!wake.speakerMatched,
+          speakerScore: wake.speakerScore,
+          speakerThreshold: wake.speakerThreshold,
+          speakerEnabled: !!wake.speakerEnabled,
+          speakerReason: wake.speakerReason || "",
           text: wake.text || "",
           wakePhrase: wake.wakePhrase || state.wakePhrase,
           requestId: wake.requestId || "",
           bytes: wake.bytes || 0,
         };
+        state.lastSpeakerScore = wake.speakerScore ?? state.lastSpeakerScore;
+        state.lastSpeakerResult = wake.speakerEnabled
+          ? (wake.speakerMatched ? "通过" : (wake.speakerReason === "speaker profile not enrolled" ? "未注册" : "未通过"))
+          : "已关闭";
+        state.lastSpeakerReason = wake.speakerReason || "";
+        updateSpeakerUi();
         renderPipeline();
       } catch {}
     }
@@ -757,6 +918,7 @@
         statusEl.textContent = "已连接";
         logProcess("通过 gateway token 连接", `clientId=${state.clientId}`);
         await loadMessages();
+        await loadSpeakerStatus();
         await enterStandby(`已连接，等待唤醒词：${state.wakePhrase}`);
       } catch (err) {
         state.authenticated = false;
@@ -1065,6 +1227,8 @@
       logProcess("切换麦克风设备", state.selectedDeviceId || "default");
     });
     refreshMicsBtn.addEventListener("click", () => refreshMicDevices());
+    speakerEnrollBtn.addEventListener("click", () => enrollSpeaker());
+    speakerRefreshBtn.addEventListener("click", () => loadSpeakerStatus());
     wakeToggleEl.addEventListener("change", async () => {
       state.wakeEnabled = !!wakeToggleEl.checked;
       if (state.wakeEnabled) {
@@ -1169,6 +1333,7 @@
     renderInputLevel();
     updateAuthUi();
     updateWakeUi();
+    updateSpeakerUi();
     refreshMicDevices();
     setSession(initial);
     resetProcess("页面已就绪");

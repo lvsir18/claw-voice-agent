@@ -22,6 +22,17 @@ OPENCLAW_HOME = pathlib.Path(
 OPENCLAW_PYTHON = os.environ.get("OPENCLAW_PYTHON", sys.executable)
 COSYVOICE_PYDEPS = os.environ.get("COSYVOICE_PYDEPS", str(OPENCLAW_HOME / "cosyvoice-pydeps"))
 PROJECT_ROOT = pathlib.Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+try:
+    from services.speaker.speaker_verify import SpeakerVerifier
+except ModuleNotFoundError:
+    SERVICES_DIR = pathlib.Path(__file__).resolve().parents[1]
+    if str(SERVICES_DIR) not in sys.path:
+        sys.path.insert(0, str(SERVICES_DIR))
+    from speaker.speaker_verify import SpeakerVerifier
+
 FRONTEND_DIR = pathlib.Path(os.environ.get("OPENCLAW_WEBCHAT_FRONTEND_DIR", str(PROJECT_ROOT / "frontend")))
 
 HOST = "0.0.0.0"
@@ -42,8 +53,9 @@ OPENCLAW_CONFIG_PATH = pathlib.Path(os.environ.get("OPENCLAW_CONFIG_PATH", str(O
 TLS_CERT_PATH = os.environ.get("OPENCLAW_WEBCHAT_TLS_CERT", "").strip()
 TLS_KEY_PATH = os.environ.get("OPENCLAW_WEBCHAT_TLS_KEY", "").strip()
 LOCK = threading.Lock()
+SPEAKER_VERIFIER = SpeakerVerifier()
 
-
+# 把事件写到日志文件，也打印到 stdout。前端的“最近动作”和唤醒调试，很多都依赖这个日志。
 def log_event(event, **fields):
     payload = {"ts": int(time.time() * 1000), "event": event, **fields}
     line = json.dumps(payload, ensure_ascii=False)
@@ -1588,7 +1600,7 @@ def html_response(handler, html_text):
     handler.end_headers()
     handler.wfile.write(body)
 
-
+# 把 session 清洗成安全文件名。
 def sanitize_session(raw):
     session = (raw or "").strip()[:120]
     if not session:
@@ -1596,11 +1608,11 @@ def sanitize_session(raw):
     session = re.sub(r"[^A-Za-z0-9:_-]", "-", session)
     return session
 
-
+# 把 session 映射到 DATA_DIR/<session>.json
 def session_file(session):
     return DATA_DIR / f"{session}.json"
 
-
+# 读整个会话消息列表。
 def load_messages(session):
     path = session_file(session)
     if not path.exists():
@@ -1610,12 +1622,12 @@ def load_messages(session):
     except Exception:
         return []
 
-
+# 把整个列表写回磁盘。
 def save_messages(session, messages):
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     session_file(session).write_text(json.dumps(messages, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
-
+# 加一条消息并保存。
 def append_message(session, role, content):
     with LOCK:
         messages = load_messages(session)
@@ -1846,21 +1858,27 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        # 返回页面
         if parsed.path in ("/", "/chat"):
             html_response(self, load_frontend_text("index.html", INDEX_HTML))
             return
+        # 返回静态资源
         if parsed.path == "/static/styles.css":
             static_response(self, FRONTEND_DIR / "styles.css", "text/css; charset=utf-8")
             return
+
         if parsed.path == "/static/app.js":
             static_response(self, FRONTEND_DIR / "app.js", "application/javascript; charset=utf-8")
             return
+        # 认证检查
         if parsed.path == "/api/auth/check":
             if not require_auth(self, parsed):
                 json_response(self, HTTPStatus.UNAUTHORIZED, {"error": "unauthorized"})
                 return
             json_response(self, HTTPStatus.OK, {"ok": True})
             return
+
+        # 健康检查
         if parsed.path == "/api/health":
             json_response(self, HTTPStatus.OK, {"ok": True, "agent": AGENT_ID, "port": PORT})
             return
@@ -1886,6 +1904,11 @@ class Handler(BaseHTTPRequestHandler):
             params = urllib.parse.parse_qs(parsed.query)
             session = sanitize_session((params.get("session") or [""])[0])
             json_response(self, HTTPStatus.OK, {"session": session, "messages": load_messages(session)})
+            return
+        if parsed.path == "/api/speaker/status":
+            params = urllib.parse.parse_qs(parsed.query)
+            speaker_id = (params.get("speaker_id") or [SPEAKER_VERIFIER.default_speaker_id])[0]
+            json_response(self, HTTPStatus.OK, SPEAKER_VERIFIER.status(speaker_id))
             return
         if parsed.path.startswith("/api/uploads/"):
             name = pathlib.Path(urllib.parse.unquote(parsed.path.split("/api/uploads/", 1)[1])).name
@@ -1937,6 +1960,28 @@ class Handler(BaseHTTPRequestHandler):
             client_id = self.headers.get("X-Client-Id", "")
             request_id = self.headers.get("X-Request-Id", "")
             session_header = self.headers.get("X-Session-Key", "")
+            if parsed.path in ("/api/speaker/enroll", "/api/speaker/verify"):
+                content_type = self.headers.get("Content-Type")
+                filename = self.headers.get("X-Filename", "speaker.wav")
+                speaker_id = self.headers.get("X-Speaker-Id", SPEAKER_VERIFIER.default_speaker_id)
+                if not raw:
+                    json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": "empty audio payload"})
+                    return
+                if len(raw) > MAX_AUDIO_BYTES:
+                    json_response(self, HTTPStatus.BAD_REQUEST, {"ok": False, "error": f"audio too large: {len(raw)} bytes"})
+                    return
+                with tempfile.TemporaryDirectory(prefix="openclaw-speaker-") as tmp:
+                    path = pathlib.Path(tmp) / f"speaker{ext_for_content_type(content_type, filename)}"
+                    path.write_bytes(raw)
+                    if parsed.path == "/api/speaker/enroll":
+                        result = SPEAKER_VERIFIER.enroll(str(path), speaker_id=speaker_id)
+                        log_event("speaker_enroll", ok=result.get("ok"), speakerId=result.get("speaker_id"), numSamples=result.get("num_samples"), clientId=client_id, requestId=request_id)
+                    else:
+                        result = SPEAKER_VERIFIER.verify(str(path), speaker_id=speaker_id)
+                        log_event("speaker_verify", ok=result.get("ok"), matched=result.get("matched"), score=result.get("score"), speakerId=result.get("speaker_id"), clientId=client_id, requestId=request_id)
+                status = HTTPStatus.OK if result.get("ok") else HTTPStatus.BAD_REQUEST
+                json_response(self, status, result)
+                return
             if parsed.path == "/api/chat":
                 payload = json.loads(raw.decode("utf-8") if raw else "{}")
                 session = sanitize_session(payload.get("session"))
@@ -2010,8 +2055,60 @@ class Handler(BaseHTTPRequestHandler):
                     transcript, asr_meta = try_transcribe_audio(raw, content_type, filename, requested_language=requested_language)
                     matched = bool(transcript) and normalize_wake_text(wake_phrase) in normalize_wake_text(transcript)
                     meta = {"engine": "asr-fallback", "fallbackError": str(sherpa_exc), **asr_meta}
-                log_event("wake_response", bytes=len(raw), filename=filename, wakePhrase=wake_phrase, text=transcript, matched=matched, language=meta.get("language"), engine=meta.get("engine"), clientId=client_id, requestId=request_id, session=session)
-                json_response(self, HTTPStatus.OK, {"ok": True, "matched": matched, "text": transcript, "meta": meta})
+                wake_matched = bool(matched)
+                speaker_enabled = SPEAKER_VERIFIER.is_enabled()
+                speaker_result = {
+                    "enabled": speaker_enabled,
+                    "matched": False,
+                    "score": None,
+                    "threshold": SPEAKER_VERIFIER.threshold if speaker_enabled else None,
+                    "reason": "wake word not matched",
+                }
+                speaker_matched = False
+                if wake_matched:
+                    with tempfile.TemporaryDirectory(prefix="openclaw-wake-speaker-") as tmp:
+                        speaker_audio = pathlib.Path(tmp) / f"wake{ext_for_content_type(content_type, filename)}"
+                        speaker_audio.write_bytes(raw)
+                        speaker_result = SPEAKER_VERIFIER.verify(str(speaker_audio), speaker_id=SPEAKER_VERIFIER.default_speaker_id)
+                    speaker_matched = bool(speaker_result.get("matched"))
+                matched = wake_matched and speaker_matched
+                speaker_reason = (
+                    speaker_result.get("reason")
+                    or speaker_result.get("error")
+                    or ("speaker matched" if speaker_matched else "speaker not matched")
+                )
+                log_event(
+                    "wake_response",
+                    bytes=len(raw),
+                    filename=filename,
+                    wakePhrase=wake_phrase,
+                    text=transcript,
+                    matched=matched,
+                    wakeMatched=wake_matched,
+                    speakerMatched=speaker_matched,
+                    speakerScore=speaker_result.get("score"),
+                    speakerThreshold=speaker_result.get("threshold"),
+                    speakerEnabled=bool(speaker_result.get("enabled")),
+                    speakerReason=speaker_reason,
+                    language=meta.get("language"),
+                    engine=meta.get("engine"),
+                    clientId=client_id,
+                    requestId=request_id,
+                    session=session,
+                )
+                json_response(self, HTTPStatus.OK, {
+                    "ok": True,
+                    "matched": matched,
+                    "wake_matched": wake_matched,
+                    "speaker_matched": speaker_matched,
+                    "speaker_score": speaker_result.get("score"),
+                    "speaker_threshold": speaker_result.get("threshold"),
+                    "speaker_enabled": bool(speaker_result.get("enabled")),
+                    "speaker_reason": speaker_reason,
+                    "speaker": speaker_result,
+                    "text": transcript,
+                    "meta": meta,
+                })
                 return
             if parsed.path == "/api/tts":
                 payload = json.loads(raw.decode("utf-8") if raw else "{}")
