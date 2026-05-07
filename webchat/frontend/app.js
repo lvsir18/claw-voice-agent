@@ -236,6 +236,8 @@
         `注册样本数：${samples}`,
         `最近验证分数：${formatSpeakerScore(state.lastSpeakerScore)}`,
         `最近验证结果：${result}${reason}`,
+        `backend: ${status.backend || state.lastWakeProbe?.speakerBackend || "-"}`,
+        `model: ${status.model_id || state.lastWakeProbe?.speakerModelId || "-"}`,
       ].forEach((text) => {
         const item = document.createElement("span");
         item.textContent = text;
@@ -517,7 +519,7 @@
       state.lastSpeakerResult = data.speaker_enabled
         ? (data.speaker_matched ? "通过" : (data.speaker_reason === "speaker profile not enrolled" ? "未注册" : "未通过"))
         : "已关闭";
-      state.lastSpeakerReason = data.speaker_reason || "";
+      state.lastSpeakerReason = data.speaker_reason || data.speaker_error || "";
       updateSpeakerUi();
       if (data.wake_matched && !data.speaker_matched) {
         const hint = data.speaker_reason === "speaker profile not enrolled" ? "请先注册声纹" : "身份确认失败";
@@ -866,7 +868,7 @@
       }
       if (state.lastWakeProbe) {
         wakeProofEl.classList.remove("hidden");
-        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
+        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerBackend=${state.lastWakeProbe.speakerBackend || "-"}\nspeakerModel=${state.lastWakeProbe.speakerModelId || "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nspeakerError=${state.lastWakeProbe.speakerError || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
       } else {
         wakeProofEl.classList.add("hidden");
         wakeProofMetaEl.textContent = "";
@@ -1011,7 +1013,10 @@
           speakerScore: wake.speakerScore,
           speakerThreshold: wake.speakerThreshold,
           speakerEnabled: !!wake.speakerEnabled,
+          speakerBackend: wake.speakerBackend || "",
+          speakerModelId: wake.speakerModelId || "",
           speakerReason: wake.speakerReason || "",
+          speakerError: wake.speakerError || "",
           text: wake.text || "",
           wakePhrase: wake.wakePhrase || state.wakePhrase,
           requestId: wake.requestId || "",

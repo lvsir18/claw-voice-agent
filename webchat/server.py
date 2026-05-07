@@ -13,6 +13,7 @@ import threading
 import time
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -2033,44 +2034,44 @@ class Handler(BaseHTTPRequestHandler):
                 requested_language = self.headers.get("X-Wake-Language", "auto")
                 session = sanitize_session(session_header) if session_header else ""
                 log_event("wake_request", remote=self.client_address[0], bytes=len(raw), contentType=content_type, filename=filename, wakePhrase=wake_phrase, requestedLanguage=requested_language, clientId=client_id, requestId=request_id, session=session)
-                transcript = ""
-                meta = {"engine": "asr-fallback"}
-                matched = False
-                prefer_sherpa = requested_language == "en"
-                try:
-                    if prefer_sherpa:
-                        sherpa = check_wake_with_sherpa(raw, wake_phrase)
-                        matched = bool(sherpa.get("matched"))
-                        transcript = str(sherpa.get("text") or "")
-                        meta = {"engine": "sherpa-kws", **sherpa}
-                        if not matched:
+                def run_wake_task():
+                    transcript = ""
+                    meta = {"engine": "asr-fallback"}
+                    matched = False
+                    prefer_sherpa = requested_language == "en"
+                    try:
+                        if prefer_sherpa:
+                            sherpa = check_wake_with_sherpa(raw, wake_phrase)
+                            matched = bool(sherpa.get("matched"))
+                            transcript = str(sherpa.get("text") or "")
+                            meta = {"engine": "sherpa-kws", **sherpa}
+                            if not matched:
+                                transcript, asr_meta = try_transcribe_audio(raw, content_type, filename, requested_language=requested_language)
+                                matched = bool(transcript) and normalize_wake_text(wake_phrase) in normalize_wake_text(transcript)
+                                meta = {"engine": "asr-fallback", "sherpa": sherpa, **asr_meta}
+                        else:
                             transcript, asr_meta = try_transcribe_audio(raw, content_type, filename, requested_language=requested_language)
                             matched = bool(transcript) and normalize_wake_text(wake_phrase) in normalize_wake_text(transcript)
-                            meta = {"engine": "asr-fallback", "sherpa": sherpa, **asr_meta}
-                    else:
+                            meta = {"engine": "asr-fallback", **asr_meta}
+                    except Exception as sherpa_exc:
                         transcript, asr_meta = try_transcribe_audio(raw, content_type, filename, requested_language=requested_language)
                         matched = bool(transcript) and normalize_wake_text(wake_phrase) in normalize_wake_text(transcript)
-                        meta = {"engine": "asr-fallback", **asr_meta}
-                except Exception as sherpa_exc:
-                    transcript, asr_meta = try_transcribe_audio(raw, content_type, filename, requested_language=requested_language)
-                    matched = bool(transcript) and normalize_wake_text(wake_phrase) in normalize_wake_text(transcript)
-                    meta = {"engine": "asr-fallback", "fallbackError": str(sherpa_exc), **asr_meta}
-                wake_matched = bool(matched)
-                speaker_enabled = SPEAKER_VERIFIER.is_enabled()
-                speaker_result = {
-                    "enabled": speaker_enabled,
-                    "matched": False,
-                    "score": None,
-                    "threshold": SPEAKER_VERIFIER.threshold if speaker_enabled else None,
-                    "reason": "wake word not matched",
-                }
-                speaker_matched = False
-                if wake_matched:
-                    with tempfile.TemporaryDirectory(prefix="openclaw-wake-speaker-") as tmp:
-                        speaker_audio = pathlib.Path(tmp) / f"wake{ext_for_content_type(content_type, filename)}"
-                        speaker_audio.write_bytes(raw)
-                        speaker_result = SPEAKER_VERIFIER.verify(str(speaker_audio), speaker_id=SPEAKER_VERIFIER.default_speaker_id)
-                    speaker_matched = bool(speaker_result.get("matched"))
+                        meta = {"engine": "asr-fallback", "fallbackError": str(sherpa_exc), **asr_meta}
+                    return {"matched": matched, "wake_matched": bool(matched), "text": transcript, "meta": meta}
+
+                with tempfile.TemporaryDirectory(prefix="openclaw-wake-speaker-") as tmp:
+                    speaker_audio = pathlib.Path(tmp) / f"wake{ext_for_content_type(content_type, filename)}"
+                    speaker_audio.write_bytes(raw)
+                    with ThreadPoolExecutor(max_workers=2) as executor:
+                        wake_future = executor.submit(run_wake_task)
+                        speaker_future = executor.submit(SPEAKER_VERIFIER.verify, str(speaker_audio), SPEAKER_VERIFIER.default_speaker_id)
+                        wake_result = wake_future.result()
+                        speaker_result = speaker_future.result()
+
+                transcript = str(wake_result.get("text") or "")
+                meta = wake_result.get("meta") or {"engine": "asr-fallback"}
+                wake_matched = bool(wake_result.get("matched") or wake_result.get("wake_matched"))
+                speaker_matched = bool(speaker_result.get("matched"))
                 matched = wake_matched and speaker_matched
                 speaker_reason = (
                     speaker_result.get("reason")
@@ -2089,7 +2090,10 @@ class Handler(BaseHTTPRequestHandler):
                     speakerScore=speaker_result.get("score"),
                     speakerThreshold=speaker_result.get("threshold"),
                     speakerEnabled=bool(speaker_result.get("enabled")),
+                    speakerBackend=speaker_result.get("backend"),
+                    speakerModelId=speaker_result.get("model_id"),
                     speakerReason=speaker_reason,
+                    speakerError=speaker_result.get("error"),
                     language=meta.get("language"),
                     engine=meta.get("engine"),
                     clientId=client_id,
@@ -2104,7 +2108,10 @@ class Handler(BaseHTTPRequestHandler):
                     "speaker_score": speaker_result.get("score"),
                     "speaker_threshold": speaker_result.get("threshold"),
                     "speaker_enabled": bool(speaker_result.get("enabled")),
+                    "speaker_backend": speaker_result.get("backend"),
+                    "speaker_model_id": speaker_result.get("model_id"),
                     "speaker_reason": speaker_reason,
+                    "speaker_error": speaker_result.get("error"),
                     "speaker": speaker_result,
                     "text": transcript,
                     "meta": meta,

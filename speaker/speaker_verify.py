@@ -6,6 +6,11 @@ import time
 from pathlib import Path
 
 
+BACKEND = "modelscope-campplus"
+DEFAULT_MODEL_ID = "damo/speech_campplus_sv_zh-cn_16k-common"
+FALLBACK_MODEL_ID = "iic/speech_campplus_sv_zh-cn_16k-common"
+
+
 def _env_bool(name, default=False):
     value = os.environ.get(name)
     if value is None:
@@ -41,21 +46,38 @@ def _safe_float(value):
             return None
 
 
+def _extract_score(result):
+    if isinstance(result, (int, float)):
+        return float(result)
+    if isinstance(result, dict):
+        for key in ("score", "scores", "similarity", "confidence"):
+            if key not in result:
+                continue
+            value = result.get(key)
+            if isinstance(value, (list, tuple)):
+                value = value[0] if value else None
+            score = _safe_float(value)
+            if score is not None:
+                return score
+    if isinstance(result, (list, tuple)):
+        for item in result:
+            score = _extract_score(item)
+            if score is not None:
+                return score
+    return None
+
+
 class SpeakerVerifier:
     def __init__(self):
         home = Path.home() / ".openclaw"
         self.default_speaker_id = os.environ.get("OPENCLAW_SPEAKER_ID", "owner").strip() or "owner"
-        self.threshold = _env_float("OPENCLAW_SPEAKER_THRESHOLD", 0.70)
+        self.threshold = _env_float("OPENCLAW_SPEAKER_THRESHOLD", 0.31)
         self.profile_dir = Path(
             os.environ.get("OPENCLAW_SPEAKER_PROFILE_DIR", str(home / "webchat/speakers"))
         ).expanduser()
-        self.model_dir = Path(
-            os.environ.get("OPENCLAW_SPEAKER_MODEL_DIR", str(home / "webchat/speaker_model"))
-        ).expanduser()
-        self.model_source = os.environ.get(
-            "OPENCLAW_SPEAKER_MODEL_SOURCE", "speechbrain/spkrec-ecapa-voxceleb"
-        ).strip() or "speechbrain/spkrec-ecapa-voxceleb"
-        self._model = None
+        self.model_id = os.environ.get("OPENCLAW_SPEAKER_MODEL_ID", DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
+        self._pipeline = None
+        self._loaded_model_id = None
         self._model_error = None
         self._lock = threading.Lock()
 
@@ -79,31 +101,40 @@ class SpeakerVerifier:
     def has_profile(self, speaker_id=None):
         return bool(self._samples(speaker_id))
 
-    def _load_model(self):
-        if self._model is not None:
-            return self._model
+    def _candidate_model_ids(self):
+        ids = [self.model_id]
+        if self.model_id != FALLBACK_MODEL_ID:
+            ids.append(FALLBACK_MODEL_ID)
+        return ids
+
+    def _load_pipeline(self):
+        if self._pipeline is not None:
+            return self._pipeline
         if self._model_error is not None:
             raise RuntimeError(self._model_error)
         with self._lock:
-            if self._model is not None:
-                return self._model
+            if self._pipeline is not None:
+                return self._pipeline
             if self._model_error is not None:
                 raise RuntimeError(self._model_error)
+            errors = []
             try:
-                try:
-                    from speechbrain.inference.speaker import SpeakerRecognition
-                except Exception:
-                    from speechbrain.pretrained import SpeakerRecognition
-
-                self.model_dir.mkdir(parents=True, exist_ok=True)
-                self._model = SpeakerRecognition.from_hparams(
-                    source=self.model_source,
-                    savedir=str(self.model_dir),
-                )
-                return self._model
+                from modelscope.pipelines import pipeline
+                from modelscope.utils.constant import Tasks
             except Exception as exc:
-                self._model_error = str(exc)
-                raise
+                self._model_error = f"failed to import modelscope: {exc}"
+                raise RuntimeError(self._model_error)
+
+            for model_id in self._candidate_model_ids():
+                try:
+                    self._pipeline = pipeline(task=Tasks.speaker_verification, model=model_id)
+                    self._loaded_model_id = model_id
+                    self._model_error = None
+                    return self._pipeline
+                except Exception as exc:
+                    errors.append(f"{model_id}: {exc}")
+            self._model_error = "failed to load ModelScope CAM++ pipeline: " + " | ".join(errors)
+            raise RuntimeError(self._model_error)
 
     def enroll(self, audio_path, speaker_id="owner"):
         sid = self._speaker_id(speaker_id)
@@ -138,6 +169,8 @@ class SpeakerVerifier:
                 "matched": True,
                 "score": None,
                 "reason": "speaker verification disabled",
+                "backend": BACKEND,
+                "model_id": self._loaded_model_id or self.model_id,
             }
 
         src = Path(audio_path)
@@ -148,6 +181,8 @@ class SpeakerVerifier:
                 "matched": False,
                 "score": None,
                 "reason": "audio file not found",
+                "backend": BACKEND,
+                "model_id": self._loaded_model_id or self.model_id,
             }
 
         samples = self._samples(sid)
@@ -160,19 +195,20 @@ class SpeakerVerifier:
                 "reason": "speaker profile not enrolled",
                 "speaker_id": sid,
                 "num_samples": 0,
+                "threshold": self.threshold,
+                "backend": BACKEND,
+                "model_id": self._loaded_model_id or self.model_id,
             }
 
         try:
-            model = self._load_model()
+            verifier = self._load_pipeline()
             best_score = None
-            best_prediction = None
             best_sample = None
             for sample in samples:
-                score, prediction = model.verify_files(str(src), str(sample))
-                score_value = _safe_float(score)
-                if score_value is not None and (best_score is None or score_value > best_score):
-                    best_score = score_value
-                    best_prediction = prediction
+                result = verifier([str(src), str(sample)], thr=self.threshold)
+                score = _extract_score(result)
+                if score is not None and (best_score is None or score > best_score):
+                    best_score = score
                     best_sample = sample
 
             matched = bool(best_score is not None and best_score >= self.threshold)
@@ -184,7 +220,8 @@ class SpeakerVerifier:
                 "threshold": self.threshold,
                 "speaker_id": sid,
                 "num_samples": len(samples),
-                "prediction": bool(_safe_float(best_prediction)) if best_prediction is not None else None,
+                "model_id": self._loaded_model_id or self.model_id,
+                "backend": BACKEND,
                 "best_sample": str(best_sample) if best_sample else None,
             }
         except Exception as exc:
@@ -196,6 +233,8 @@ class SpeakerVerifier:
                 "threshold": self.threshold,
                 "speaker_id": sid,
                 "num_samples": len(samples),
+                "model_id": self._loaded_model_id or self.model_id,
+                "backend": BACKEND,
                 "error": str(exc),
             }
 
@@ -210,8 +249,9 @@ class SpeakerVerifier:
             "has_profile": bool(samples),
             "num_samples": len(samples),
             "profile_dir": str(self._speaker_dir(sid)),
-            "model_dir": str(self.model_dir),
-            "model_source": self.model_source,
-            "model_loaded": self._model is not None,
+            "model_id": self._loaded_model_id or self.model_id,
+            "configured_model_id": self.model_id,
+            "backend": BACKEND,
+            "model_loaded": self._pipeline is not None,
             "model_error": self._model_error,
         }
