@@ -2064,7 +2064,7 @@ class Handler(BaseHTTPRequestHandler):
                     speaker_audio.write_bytes(raw)
                     with ThreadPoolExecutor(max_workers=2) as executor:
                         wake_future = executor.submit(run_wake_task)
-                        speaker_future = executor.submit(SPEAKER_VERIFIER.verify, str(speaker_audio), SPEAKER_VERIFIER.default_speaker_id)
+                        speaker_future = executor.submit(SPEAKER_VERIFIER.verify_any, str(speaker_audio))
                         wake_result = wake_future.result()
                         speaker_result = speaker_future.result()
 
@@ -2090,6 +2090,7 @@ class Handler(BaseHTTPRequestHandler):
                     speakerScore=speaker_result.get("score"),
                     speakerThreshold=speaker_result.get("threshold"),
                     speakerEnabled=bool(speaker_result.get("enabled")),
+                    speakerId=speaker_result.get("speaker_id"),
                     speakerBackend=speaker_result.get("backend"),
                     speakerModelId=speaker_result.get("model_id"),
                     speakerReason=speaker_reason,
@@ -2108,6 +2109,7 @@ class Handler(BaseHTTPRequestHandler):
                     "speaker_score": speaker_result.get("score"),
                     "speaker_threshold": speaker_result.get("threshold"),
                     "speaker_enabled": bool(speaker_result.get("enabled")),
+                    "speaker_id": speaker_result.get("speaker_id"),
                     "speaker_backend": speaker_result.get("backend"),
                     "speaker_model_id": speaker_result.get("model_id"),
                     "speaker_reason": speaker_reason,

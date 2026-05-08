@@ -98,6 +98,20 @@ class SpeakerVerifier:
         suffixes = {".wav", ".flac", ".mp3", ".ogg", ".m4a", ".webm"}
         return sorted(path for path in directory.iterdir() if path.is_file() and path.suffix.lower() in suffixes)
 
+    def list_profiles(self):
+        if not self.profile_dir.exists():
+            return []
+        profiles = []
+        for directory in sorted(path for path in self.profile_dir.iterdir() if path.is_dir()):
+            samples = self._samples(directory.name)
+            profiles.append({
+                "speaker_id": directory.name,
+                "num_samples": len(samples),
+                "has_profile": bool(samples),
+                "profile_dir": str(directory),
+            })
+        return profiles
+
     def has_profile(self, speaker_id=None):
         return bool(self._samples(speaker_id))
 
@@ -160,6 +174,19 @@ class SpeakerVerifier:
         except Exception as exc:
             return {"ok": False, "speaker_id": sid, "error": str(exc)}
 
+    def _verify_samples(self, audio_path, speaker_id, samples):
+        verifier = self._load_pipeline()
+        src = Path(audio_path)
+        best_score = None
+        best_sample = None
+        for sample in samples:
+            result = verifier([str(src), str(sample)], thr=self.threshold)
+            score = _extract_score(result)
+            if score is not None and (best_score is None or score > best_score):
+                best_score = score
+                best_sample = sample
+        return best_score, best_sample
+
     def verify(self, audio_path, speaker_id="owner"):
         sid = self._speaker_id(speaker_id)
         if not self.is_enabled():
@@ -201,16 +228,7 @@ class SpeakerVerifier:
             }
 
         try:
-            verifier = self._load_pipeline()
-            best_score = None
-            best_sample = None
-            for sample in samples:
-                result = verifier([str(src), str(sample)], thr=self.threshold)
-                score = _extract_score(result)
-                if score is not None and (best_score is None or score > best_score):
-                    best_score = score
-                    best_sample = sample
-
+            best_score, best_sample = self._verify_samples(str(src), sid, samples)
             matched = bool(best_score is not None and best_score >= self.threshold)
             return {
                 "ok": True,
@@ -238,6 +256,98 @@ class SpeakerVerifier:
                 "error": str(exc),
             }
 
+    def verify_any(self, audio_path):
+        if not self.is_enabled():
+            return {
+                "ok": True,
+                "enabled": False,
+                "matched": True,
+                "score": None,
+                "speaker_id": self.default_speaker_id,
+                "reason": "speaker verification disabled",
+                "backend": BACKEND,
+                "model_id": self._loaded_model_id or self.model_id,
+            }
+
+        src = Path(audio_path)
+        if not src.exists() or not src.is_file():
+            return {
+                "ok": False,
+                "enabled": True,
+                "matched": False,
+                "score": None,
+                "reason": "audio file not found",
+                "backend": BACKEND,
+                "model_id": self._loaded_model_id or self.model_id,
+            }
+
+        profiles = [profile for profile in self.list_profiles() if profile.get("has_profile")]
+        if not profiles:
+            return {
+                "ok": False,
+                "enabled": True,
+                "matched": False,
+                "score": None,
+                "threshold": self.threshold,
+                "speaker_id": None,
+                "num_samples": 0,
+                "profiles": [],
+                "reason": "speaker profile not enrolled",
+                "backend": BACKEND,
+                "model_id": self._loaded_model_id or self.model_id,
+            }
+
+        try:
+            best_score = None
+            best_sample = None
+            best_speaker_id = None
+            best_num_samples = 0
+            checked = []
+            for profile in profiles:
+                sid = profile["speaker_id"]
+                samples = self._samples(sid)
+                score, sample = self._verify_samples(str(src), sid, samples)
+                checked.append({
+                    "speaker_id": sid,
+                    "score": score,
+                    "num_samples": len(samples),
+                })
+                if score is not None and (best_score is None or score > best_score):
+                    best_score = score
+                    best_sample = sample
+                    best_speaker_id = sid
+                    best_num_samples = len(samples)
+
+            matched = bool(best_score is not None and best_score >= self.threshold)
+            return {
+                "ok": True,
+                "enabled": True,
+                "matched": matched,
+                "score": best_score,
+                "threshold": self.threshold,
+                "speaker_id": best_speaker_id,
+                "num_samples": best_num_samples,
+                "profiles": checked,
+                "model_id": self._loaded_model_id or self.model_id,
+                "backend": BACKEND,
+                "best_sample": str(best_sample) if best_sample else None,
+                "reason": "speaker matched" if matched else "speaker not matched",
+            }
+        except Exception as exc:
+            return {
+                "ok": False,
+                "enabled": True,
+                "matched": False,
+                "score": None,
+                "threshold": self.threshold,
+                "speaker_id": None,
+                "num_samples": 0,
+                "profiles": profiles,
+                "model_id": self._loaded_model_id or self.model_id,
+                "backend": BACKEND,
+                "error": str(exc),
+            }
+
     def status(self, speaker_id="owner"):
         sid = self._speaker_id(speaker_id)
         samples = self._samples(sid)
@@ -249,6 +359,7 @@ class SpeakerVerifier:
             "has_profile": bool(samples),
             "num_samples": len(samples),
             "profile_dir": str(self._speaker_dir(sid)),
+            "profiles": self.list_profiles(),
             "model_id": self._loaded_model_id or self.model_id,
             "configured_model_id": self.model_id,
             "backend": BACKEND,

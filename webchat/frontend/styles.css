@@ -70,6 +70,8 @@
     .speaker-panel { border:1px solid var(--border); border-radius:12px; background:#10131a; padding:10px; display:flex; flex-direction:column; gap:10px; }
     .speaker-panel__head { display:flex; align-items:center; justify-content:space-between; gap:8px; flex-wrap:wrap; }
     .speaker-panel__actions { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .speaker-panel__actions select,
+    .speaker-panel__actions input { width:auto; min-height:40px; }
     .speaker-status { display:grid; grid-template-columns:repeat(auto-fit, minmax(150px, 1fr)); gap:8px; color:var(--muted); font-size:12px; }
     .speaker-status span { border:1px solid rgba(255,255,255,.05); border-radius:10px; background:#0b0d12; padding:8px 10px; min-width:0; word-break:break-word; }
     .modal { position:fixed; inset:0; z-index:50; display:grid; place-items:center; padding:18px; background:rgba(5,7,10,.72); }

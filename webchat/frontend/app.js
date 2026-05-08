@@ -55,6 +55,7 @@
       currentRecordAutoSend: false,
       currentRecordWakeTriggered: false,
       speakerStatus: null,
+      currentSpeakerId: localStorage.getItem("openclaw-webchat-speaker-id") || "owner",
       speakerEnrollRecording: false,
       speakerEnrollOpen: false,
       speakerEnrollSamples: [],
@@ -91,6 +92,9 @@
     const wakePhraseInputEl = $("wakePhraseInput");
     const wakeStatusEl = $("wakeStatus");
     const speakerStatusEl = $("speakerStatus");
+    const speakerSelectEl = $("speakerSelect");
+    const speakerIdInputEl = $("speakerIdInput");
+    const speakerSwitchBtn = $("speakerSwitchBtn");
     const speakerEnrollBtn = $("speakerEnrollBtn");
     const speakerRefreshBtn = $("speakerRefreshBtn");
     const speakerEnrollModalEl = $("speakerEnrollModal");
@@ -185,6 +189,7 @@
       reloadBtn.disabled = blocked;
       speakerEnrollBtn.disabled = blocked || state.speakerEnrollRecording;
       speakerRefreshBtn.disabled = blocked || state.speakerEnrollRecording;
+      speakerSwitchBtn.disabled = blocked || state.speakerEnrollRecording;
       statusEl.textContent = text;
     }
 
@@ -208,6 +213,7 @@
       recordBtn.disabled = !state.authenticated;
       speakerEnrollBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
       speakerRefreshBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
+      speakerSwitchBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
     }
 
     function renderInputLevel() {
@@ -225,15 +231,36 @@
     function updateSpeakerUi() {
       const status = state.speakerStatus || {};
       const enabledText = status.enabled ? "已开启" : "已关闭";
-      const speakerId = status.speaker_id || "owner";
+      const speakerId = status.speaker_id || state.currentSpeakerId || "owner";
       const samples = Number.isFinite(Number(status.num_samples)) ? Number(status.num_samples) : 0;
+      const profiles = Array.isArray(status.profiles) ? status.profiles : [];
+      const registeredCount = profiles.filter((profile) => profile.has_profile).length;
+      if (speakerSelectEl && speakerIdInputEl) {
+        const selectedExists = profiles.some((profile) => profile.speaker_id === speakerId);
+        speakerSelectEl.innerHTML = "";
+        const selectedOption = document.createElement("option");
+        selectedOption.value = speakerId;
+        selectedOption.textContent = `${speakerId}${selectedExists ? "" : " (new)"}`;
+        speakerSelectEl.appendChild(selectedOption);
+        profiles.forEach((profile) => {
+          if (!profile.speaker_id || profile.speaker_id === speakerId) return;
+          const option = document.createElement("option");
+          option.value = profile.speaker_id;
+          option.textContent = `${profile.speaker_id} (${profile.num_samples || 0})`;
+          speakerSelectEl.appendChild(option);
+        });
+        speakerSelectEl.value = speakerId;
+        speakerIdInputEl.value = speakerId;
+      }
       const result = state.lastSpeakerResult || (status.has_profile ? "-" : "未注册");
       const reason = state.lastSpeakerReason ? `（${state.lastSpeakerReason}）` : "";
       speakerStatusEl.innerHTML = "";
       [
         `声纹验证：${enabledText}`,
         `当前身份：${speakerId}`,
+        `已注册身份数：${registeredCount}`,
         `注册样本数：${samples}`,
+        `最近匹配身份：${state.lastWakeProbe?.speakerId || "-"}`,
         `最近验证分数：${formatSpeakerScore(state.lastSpeakerScore)}`,
         `最近验证结果：${result}${reason}`,
         `backend: ${status.backend || state.lastWakeProbe?.speakerBackend || "-"}`,
@@ -287,8 +314,10 @@
         return;
       }
       try {
-        const data = await api("/api/speaker/status");
+        const data = await api(`/api/speaker/status?speaker_id=${encodeURIComponent(state.currentSpeakerId || "owner")}`);
         state.speakerStatus = data;
+        state.currentSpeakerId = data.speaker_id || state.currentSpeakerId || "owner";
+        localStorage.setItem("openclaw-webchat-speaker-id", state.currentSpeakerId);
         if (!data.has_profile && !state.lastSpeakerResult) state.lastSpeakerResult = "未注册";
         updateSpeakerUi();
       } catch (err) {
@@ -296,6 +325,17 @@
         state.lastSpeakerReason = err.message;
         updateSpeakerUi();
       }
+    }
+
+    async function switchSpeakerIdentity(nextId) {
+      const cleaned = String(nextId || "").trim() || "owner";
+      state.currentSpeakerId = cleaned;
+      localStorage.setItem("openclaw-webchat-speaker-id", cleaned);
+      state.lastSpeakerScore = null;
+      state.lastSpeakerResult = "";
+      state.lastSpeakerReason = "";
+      await loadSpeakerStatus();
+      logProcess("切换声纹身份", `speaker=${cleaned}`);
     }
 
     function normalizeWakeText(text) {
@@ -520,6 +560,9 @@
         ? (data.speaker_matched ? "通过" : (data.speaker_reason === "speaker profile not enrolled" ? "未注册" : "未通过"))
         : "已关闭";
       state.lastSpeakerReason = data.speaker_reason || data.speaker_error || "";
+      if (data.speaker_id) {
+        state.lastWakeProbe = { ...(state.lastWakeProbe || {}), speakerId: data.speaker_id };
+      }
       updateSpeakerUi();
       if (data.wake_matched && !data.speaker_matched) {
         const hint = data.speaker_reason === "speaker profile not enrolled" ? "请先注册声纹" : "身份确认失败";
@@ -597,6 +640,7 @@
           headers: {
             "Content-Type": "audio/wav",
             "X-Filename": `speaker-enroll-${Date.now()}.wav`,
+            "X-Speaker-Id": state.currentSpeakerId || "owner",
             "X-Client-Id": state.clientId,
             "X-Request-Id": makeId("speaker"),
             "X-Session-Key": state.session,
@@ -606,7 +650,7 @@
         state.lastSpeakerResult = "已注册";
         state.lastSpeakerReason = "";
         statusEl.textContent = `声纹注册成功，样本数：${data.num_samples || 0}`;
-        logProcess("声纹注册成功", `speaker=${data.speaker_id || "owner"}\nnumSamples=${data.num_samples || 0}`);
+        logProcess("声纹注册成功", `speaker=${data.speaker_id || state.currentSpeakerId || "owner"}\nnumSamples=${data.num_samples || 0}`);
         await loadSpeakerStatus();
       } catch (err) {
         state.lastSpeakerResult = "注册失败";
@@ -673,6 +717,7 @@
             headers: {
               "Content-Type": "audio/wav",
               "X-Filename": `speaker-enroll-${Date.now()}-${i + 1}.wav`,
+              "X-Speaker-Id": state.currentSpeakerId || "owner",
               "X-Client-Id": state.clientId,
               "X-Request-Id": makeId("speaker"),
               "X-Session-Key": state.session,
@@ -683,7 +728,7 @@
         state.lastSpeakerResult = "已注册";
         state.lastSpeakerReason = "";
         statusEl.textContent = `声纹注册成功，新增 ${state.speakerEnrollSamples.length} 段样本`;
-        logProcess("声纹注册成功", `speaker=${last?.speaker_id || "owner"}\nnumSamples=${last?.num_samples || 0}`);
+        logProcess("声纹注册成功", `speaker=${last?.speaker_id || state.currentSpeakerId || "owner"}\nnumSamples=${last?.num_samples || 0}`);
         closeSpeakerEnrollModal();
         await loadSpeakerStatus();
       } catch (err) {
@@ -868,7 +913,7 @@
       }
       if (state.lastWakeProbe) {
         wakeProofEl.classList.remove("hidden");
-        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerBackend=${state.lastWakeProbe.speakerBackend || "-"}\nspeakerModel=${state.lastWakeProbe.speakerModelId || "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nspeakerError=${state.lastWakeProbe.speakerError || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
+        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerId=${state.lastWakeProbe.speakerId || "-"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerBackend=${state.lastWakeProbe.speakerBackend || "-"}\nspeakerModel=${state.lastWakeProbe.speakerModelId || "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nspeakerError=${state.lastWakeProbe.speakerError || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
       } else {
         wakeProofEl.classList.add("hidden");
         wakeProofMetaEl.textContent = "";
@@ -1013,6 +1058,7 @@
           speakerScore: wake.speakerScore,
           speakerThreshold: wake.speakerThreshold,
           speakerEnabled: !!wake.speakerEnabled,
+          speakerId: wake.speakerId || "",
           speakerBackend: wake.speakerBackend || "",
           speakerModelId: wake.speakerModelId || "",
           speakerReason: wake.speakerReason || "",
@@ -1368,6 +1414,14 @@
       logProcess("切换麦克风设备", state.selectedDeviceId || "default");
     });
     refreshMicsBtn.addEventListener("click", () => refreshMicDevices());
+    speakerSelectEl.addEventListener("change", () => switchSpeakerIdentity(speakerSelectEl.value));
+    speakerSwitchBtn.addEventListener("click", () => switchSpeakerIdentity(speakerIdInputEl.value));
+    speakerIdInputEl.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        switchSpeakerIdentity(speakerIdInputEl.value);
+      }
+    });
     speakerEnrollBtn.addEventListener("click", () => enrollSpeaker());
     speakerRefreshBtn.addEventListener("click", () => loadSpeakerStatus());
     speakerEnrollRecordBtn.addEventListener("click", () => recordSpeakerEnrollPass());
