@@ -56,6 +56,7 @@
       currentRecordWakeTriggered: false,
       speakerStatus: null,
       currentSpeakerId: localStorage.getItem("openclaw-webchat-speaker-id") || "owner",
+      speakerMatchMode: localStorage.getItem("openclaw-webchat-speaker-match-mode") || "all",
       speakerEnrollRecording: false,
       speakerEnrollOpen: false,
       speakerEnrollSamples: [],
@@ -95,6 +96,7 @@
     const speakerSelectEl = $("speakerSelect");
     const speakerIdInputEl = $("speakerIdInput");
     const speakerSwitchBtn = $("speakerSwitchBtn");
+    const speakerMatchModeSelectEl = $("speakerMatchModeSelect");
     const speakerEnrollBtn = $("speakerEnrollBtn");
     const speakerRefreshBtn = $("speakerRefreshBtn");
     const speakerEnrollModalEl = $("speakerEnrollModal");
@@ -190,6 +192,7 @@
       speakerEnrollBtn.disabled = blocked || state.speakerEnrollRecording;
       speakerRefreshBtn.disabled = blocked || state.speakerEnrollRecording;
       speakerSwitchBtn.disabled = blocked || state.speakerEnrollRecording;
+      speakerMatchModeSelectEl.disabled = blocked || state.speakerEnrollRecording;
       statusEl.textContent = text;
     }
 
@@ -214,6 +217,7 @@
       speakerEnrollBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
       speakerRefreshBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
       speakerSwitchBtn.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
+      speakerMatchModeSelectEl.disabled = !state.authenticated || state.busy || state.speakerEnrollRecording;
     }
 
     function renderInputLevel() {
@@ -232,6 +236,7 @@
       const status = state.speakerStatus || {};
       const enabledText = status.enabled ? "已开启" : "已关闭";
       const speakerId = status.speaker_id || state.currentSpeakerId || "owner";
+      const matchModeText = state.speakerMatchMode === "current" ? "仅当前身份" : "所有已注册身份";
       const samples = Number.isFinite(Number(status.num_samples)) ? Number(status.num_samples) : 0;
       const profiles = Array.isArray(status.profiles) ? status.profiles : [];
       const registeredCount = profiles.filter((profile) => profile.has_profile).length;
@@ -258,6 +263,7 @@
       [
         `声纹验证：${enabledText}`,
         `当前身份：${speakerId}`,
+        `唤醒范围：${matchModeText}`,
         `已注册身份数：${registeredCount}`,
         `注册样本数：${samples}`,
         `最近匹配身份：${state.lastWakeProbe?.speakerId || "-"}`,
@@ -546,6 +552,8 @@
         "X-Filename": `wake-${Date.now()}.wav`,
         "X-Wake-Language": wakeLanguageCode(),
         "X-Wake-Phrase-B64": base64Utf8(state.wakePhrase),
+        "X-Speaker-Id": state.currentSpeakerId || "owner",
+        "X-Speaker-Match-Mode": state.speakerMatchMode === "current" ? "current" : "all",
         "X-Client-Id": state.clientId,
         "X-Request-Id": reqId,
         "X-Session-Key": state.session,
@@ -560,8 +568,12 @@
         ? (data.speaker_matched ? "通过" : (data.speaker_reason === "speaker profile not enrolled" ? "未注册" : "未通过"))
         : "已关闭";
       state.lastSpeakerReason = data.speaker_reason || data.speaker_error || "";
-      if (data.speaker_id) {
-        state.lastWakeProbe = { ...(state.lastWakeProbe || {}), speakerId: data.speaker_id };
+      if (data.speaker_id || data.speaker_match_mode) {
+        state.lastWakeProbe = {
+          ...(state.lastWakeProbe || {}),
+          speakerId: data.speaker_id || state.lastWakeProbe?.speakerId || "",
+          speakerMatchMode: data.speaker_match_mode || state.speakerMatchMode || "all",
+        };
       }
       updateSpeakerUi();
       if (data.wake_matched && !data.speaker_matched) {
@@ -913,7 +925,7 @@
       }
       if (state.lastWakeProbe) {
         wakeProofEl.classList.remove("hidden");
-        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerId=${state.lastWakeProbe.speakerId || "-"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerBackend=${state.lastWakeProbe.speakerBackend || "-"}\nspeakerModel=${state.lastWakeProbe.speakerModelId || "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nspeakerError=${state.lastWakeProbe.speakerError || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
+        wakeProofMetaEl.textContent = `engine=${state.lastWakeProbe.engine || "unknown"}\nmatched=${state.lastWakeProbe.matched ? "yes" : "no"}\nwakeMatched=${state.lastWakeProbe.wakeMatched ? "yes" : "no"}\nspeakerMatched=${state.lastWakeProbe.speakerMatched ? "yes" : "no"}\nspeakerId=${state.lastWakeProbe.speakerId || "-"}\nspeakerMatchMode=${state.lastWakeProbe.speakerMatchMode || state.speakerMatchMode || "all"}\nspeakerScore=${formatSpeakerScore(state.lastWakeProbe.speakerScore)}\nspeakerThreshold=${state.lastWakeProbe.speakerThreshold ?? "-"}\nspeakerBackend=${state.lastWakeProbe.speakerBackend || "-"}\nspeakerModel=${state.lastWakeProbe.speakerModelId || "-"}\nspeakerReason=${state.lastWakeProbe.speakerReason || ""}\nspeakerError=${state.lastWakeProbe.speakerError || ""}\nphrase=${state.lastWakeProbe.wakePhrase || state.wakePhrase}\ntext=${state.lastWakeProbe.text || "[empty]"}\nrequestId=${state.lastWakeProbe.requestId || ""}\nbytes=${state.lastWakeProbe.bytes || ""}\nts=${state.lastWakeProbe.ts ? fmtTime(state.lastWakeProbe.ts) : ""}`;
       } else {
         wakeProofEl.classList.add("hidden");
         wakeProofMetaEl.textContent = "";
@@ -1059,6 +1071,7 @@
           speakerThreshold: wake.speakerThreshold,
           speakerEnabled: !!wake.speakerEnabled,
           speakerId: wake.speakerId || "",
+          speakerMatchMode: wake.speakerMatchMode || state.speakerMatchMode || "all",
           speakerBackend: wake.speakerBackend || "",
           speakerModelId: wake.speakerModelId || "",
           speakerReason: wake.speakerReason || "",
@@ -1422,6 +1435,12 @@
         switchSpeakerIdentity(speakerIdInputEl.value);
       }
     });
+    speakerMatchModeSelectEl.addEventListener("change", () => {
+      state.speakerMatchMode = speakerMatchModeSelectEl.value === "current" ? "current" : "all";
+      localStorage.setItem("openclaw-webchat-speaker-match-mode", state.speakerMatchMode);
+      updateSpeakerUi();
+      logProcess("切换唤醒身份范围", state.speakerMatchMode === "current" ? "仅当前身份可唤醒" : "所有身份可唤醒");
+    });
     speakerEnrollBtn.addEventListener("click", () => enrollSpeaker());
     speakerRefreshBtn.addEventListener("click", () => loadSpeakerStatus());
     speakerEnrollRecordBtn.addEventListener("click", () => recordSpeakerEnrollPass());
@@ -1528,6 +1547,7 @@
     autoTtsToggleEl.checked = state.autoTts;
     wakeToggleEl.checked = state.wakeEnabled;
     wakePhraseInputEl.value = state.wakePhrase;
+    speakerMatchModeSelectEl.value = state.speakerMatchMode === "current" ? "current" : "all";
     tokenInputEl.value = initialToken;
     renderInputLevel();
     updateAuthUi();

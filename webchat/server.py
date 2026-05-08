@@ -2032,8 +2032,12 @@ class Handler(BaseHTTPRequestHandler):
                 if not wake_phrase:
                     wake_phrase = self.headers.get("X-Wake-Phrase", "你好")
                 requested_language = self.headers.get("X-Wake-Language", "auto")
+                speaker_id = self.headers.get("X-Speaker-Id", SPEAKER_VERIFIER.default_speaker_id)
+                speaker_match_mode = self.headers.get("X-Speaker-Match-Mode", "all").strip().lower()
+                if speaker_match_mode not in ("all", "current"):
+                    speaker_match_mode = "all"
                 session = sanitize_session(session_header) if session_header else ""
-                log_event("wake_request", remote=self.client_address[0], bytes=len(raw), contentType=content_type, filename=filename, wakePhrase=wake_phrase, requestedLanguage=requested_language, clientId=client_id, requestId=request_id, session=session)
+                log_event("wake_request", remote=self.client_address[0], bytes=len(raw), contentType=content_type, filename=filename, wakePhrase=wake_phrase, requestedLanguage=requested_language, speakerId=speaker_id, speakerMatchMode=speaker_match_mode, clientId=client_id, requestId=request_id, session=session)
                 def run_wake_task():
                     transcript = ""
                     meta = {"engine": "asr-fallback"}
@@ -2064,7 +2068,10 @@ class Handler(BaseHTTPRequestHandler):
                     speaker_audio.write_bytes(raw)
                     with ThreadPoolExecutor(max_workers=2) as executor:
                         wake_future = executor.submit(run_wake_task)
-                        speaker_future = executor.submit(SPEAKER_VERIFIER.verify_any, str(speaker_audio))
+                        if speaker_match_mode == "current":
+                            speaker_future = executor.submit(SPEAKER_VERIFIER.verify, str(speaker_audio), speaker_id)
+                        else:
+                            speaker_future = executor.submit(SPEAKER_VERIFIER.verify_any, str(speaker_audio))
                         wake_result = wake_future.result()
                         speaker_result = speaker_future.result()
 
@@ -2091,6 +2098,7 @@ class Handler(BaseHTTPRequestHandler):
                     speakerThreshold=speaker_result.get("threshold"),
                     speakerEnabled=bool(speaker_result.get("enabled")),
                     speakerId=speaker_result.get("speaker_id"),
+                    speakerMatchMode=speaker_match_mode,
                     speakerBackend=speaker_result.get("backend"),
                     speakerModelId=speaker_result.get("model_id"),
                     speakerReason=speaker_reason,
@@ -2110,6 +2118,7 @@ class Handler(BaseHTTPRequestHandler):
                     "speaker_threshold": speaker_result.get("threshold"),
                     "speaker_enabled": bool(speaker_result.get("enabled")),
                     "speaker_id": speaker_result.get("speaker_id"),
+                    "speaker_match_mode": speaker_match_mode,
                     "speaker_backend": speaker_result.get("backend"),
                     "speaker_model_id": speaker_result.get("model_id"),
                     "speaker_reason": speaker_reason,

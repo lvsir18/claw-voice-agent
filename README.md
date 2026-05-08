@@ -246,6 +246,11 @@ $HOME/.openclaw/webchat/speakers/<speaker_id>/enroll_*.wav
 
 前端的“当前身份”只用于查看状态和注册新样本。唤醒检测时后端会遍历所有已经注册样本的身份，分别做 CAM++ speaker verification，取最高分对应的身份作为 `speaker_id`。最终仍然要求 `wake_matched=true` 且 `speaker_matched=true` 才会触发正式录音。
 
+前端提供“唤醒范围”选项：
+
+- `所有身份可唤醒`：遍历所有已注册身份，任意身份通过即可唤醒。
+- `仅当前身份可唤醒`：只验证前端当前选择的身份，其他已注册身份说出唤醒词也不会触发正式录音。
+
 例如注册两个人：
 
 1. 在前端身份输入框填 `owner`，点击“切换身份”，再注册声纹。
