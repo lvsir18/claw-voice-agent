@@ -145,7 +145,7 @@
     const AUTO_STOP_SILENCE_MS = 1200;
     const AUTO_STOP_LEVEL = 0.028;
     const WAKE_CHUNK_MS_EN = 1500;
-    const WAKE_CHUNK_MS_ZH = 2400;
+    const WAKE_CHUNK_MS_ZH = 3500;
 
     function qsSession() {
       const url = new URL(window.location.href);
@@ -270,7 +270,6 @@
         `最近验证分数：${formatSpeakerScore(state.lastSpeakerScore)}`,
         `最近验证结果：${result}${reason}`,
         `backend: ${status.backend || state.lastWakeProbe?.speakerBackend || "-"}`,
-        `model: ${status.model_id || state.lastWakeProbe?.speakerModelId || "-"}`,
       ].forEach((text) => {
         const item = document.createElement("span");
         item.textContent = text;
