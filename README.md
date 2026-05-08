@@ -193,6 +193,7 @@ OPENCLAW_SPEAKER_ID=owner
 OPENCLAW_SPEAKER_THRESHOLD=0.31
 OPENCLAW_SPEAKER_PROFILE_DIR=$HOME/.openclaw/webchat/speakers
 OPENCLAW_SPEAKER_MODEL_ID=damo/speech_campplus_sv_zh-cn_16k-common
+OPENCLAW_SPEAKER_SAMPLE_STRATEGY=best
 ```
 
 如果默认模型加载失败，代码会尝试 fallback 到：
@@ -250,6 +251,11 @@ $HOME/.openclaw/webchat/speakers/<speaker_id>/enroll_*.wav
 
 - `所有身份可唤醒`：遍历所有已注册身份，任意身份通过即可唤醒。
 - `仅当前身份可唤醒`：只验证前端当前选择的身份，其他已注册身份说出唤醒词也不会触发正式录音。
+
+声纹样本策略可通过 `OPENCLAW_SPEAKER_SAMPLE_STRATEGY` 调整：
+
+- `best`：默认策略，逐条比对当前身份的所有注册样本并取最高分。
+- `latest`：低延迟策略，只和每个身份最新的一段注册样本比对。配合“仅当前身份可唤醒”时，每次声纹验证只做一次 CAM++ 对比。
 
 例如注册两个人：
 

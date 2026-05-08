@@ -76,6 +76,11 @@ class SpeakerVerifier:
             os.environ.get("OPENCLAW_SPEAKER_PROFILE_DIR", str(home / "webchat/speakers"))
         ).expanduser()
         self.model_id = os.environ.get("OPENCLAW_SPEAKER_MODEL_ID", DEFAULT_MODEL_ID).strip() or DEFAULT_MODEL_ID
+        self.sample_strategy = (
+            os.environ.get("OPENCLAW_SPEAKER_SAMPLE_STRATEGY", "best").strip().lower() or "best"
+        )
+        if self.sample_strategy not in {"best", "latest"}:
+            self.sample_strategy = "best"
         self._pipeline = None
         self._loaded_model_id = None
         self._model_error = None
@@ -114,6 +119,11 @@ class SpeakerVerifier:
 
     def has_profile(self, speaker_id=None):
         return bool(self._samples(speaker_id))
+
+    def _selected_samples(self, samples):
+        if self.sample_strategy == "latest" and samples:
+            return [max(samples, key=lambda path: path.stat().st_mtime)]
+        return samples
 
     def _candidate_model_ids(self):
         ids = [self.model_id]
@@ -177,15 +187,16 @@ class SpeakerVerifier:
     def _verify_samples(self, audio_path, speaker_id, samples):
         verifier = self._load_pipeline()
         src = Path(audio_path)
+        selected_samples = self._selected_samples(samples)
         best_score = None
         best_sample = None
-        for sample in samples:
+        for sample in selected_samples:
             result = verifier([str(src), str(sample)], thr=self.threshold)
             score = _extract_score(result)
             if score is not None and (best_score is None or score > best_score):
                 best_score = score
                 best_sample = sample
-        return best_score, best_sample
+        return best_score, best_sample, len(selected_samples)
 
     def verify(self, audio_path, speaker_id="owner"):
         sid = self._speaker_id(speaker_id)
@@ -225,10 +236,10 @@ class SpeakerVerifier:
                 "threshold": self.threshold,
                 "backend": BACKEND,
                 "model_id": self._loaded_model_id or self.model_id,
-            }
+        }
 
         try:
-            best_score, best_sample = self._verify_samples(str(src), sid, samples)
+            best_score, best_sample, compared_samples = self._verify_samples(str(src), sid, samples)
             matched = bool(best_score is not None and best_score >= self.threshold)
             return {
                 "ok": True,
@@ -238,6 +249,8 @@ class SpeakerVerifier:
                 "threshold": self.threshold,
                 "speaker_id": sid,
                 "num_samples": len(samples),
+                "compared_samples": compared_samples,
+                "sample_strategy": self.sample_strategy,
                 "model_id": self._loaded_model_id or self.model_id,
                 "backend": BACKEND,
                 "best_sample": str(best_sample) if best_sample else None,
@@ -306,11 +319,12 @@ class SpeakerVerifier:
             for profile in profiles:
                 sid = profile["speaker_id"]
                 samples = self._samples(sid)
-                score, sample = self._verify_samples(str(src), sid, samples)
+                score, sample, compared_samples = self._verify_samples(str(src), sid, samples)
                 checked.append({
                     "speaker_id": sid,
                     "score": score,
                     "num_samples": len(samples),
+                    "compared_samples": compared_samples,
                 })
                 if score is not None and (best_score is None or score > best_score):
                     best_score = score
@@ -327,6 +341,7 @@ class SpeakerVerifier:
                 "threshold": self.threshold,
                 "speaker_id": best_speaker_id,
                 "num_samples": best_num_samples,
+                "sample_strategy": self.sample_strategy,
                 "profiles": checked,
                 "model_id": self._loaded_model_id or self.model_id,
                 "backend": BACKEND,
@@ -360,6 +375,7 @@ class SpeakerVerifier:
             "num_samples": len(samples),
             "profile_dir": str(self._speaker_dir(sid)),
             "profiles": self.list_profiles(),
+            "sample_strategy": self.sample_strategy,
             "model_id": self._loaded_model_id or self.model_id,
             "configured_model_id": self.model_id,
             "backend": BACKEND,
