@@ -1725,7 +1725,20 @@ def normalize_chinese_text(text):
 
 
 def normalize_wake_text(text):
-    return re.sub(r"[\s\W_]+", "", str(text or "").lower(), flags=re.UNICODE)
+    digit_aliases = {
+        "0": "0", "零": "0", "〇": "0", "洞": "0",
+        "1": "1", "一": "1", "壹": "1", "幺": "1",
+        "2": "2", "二": "2", "贰": "2", "两": "2", "俩": "2",
+        "3": "3", "三": "3", "叁": "3",
+        "4": "4", "四": "4", "肆": "4",
+        "5": "5", "五": "5", "伍": "5",
+        "6": "6", "六": "6", "陆": "6",
+        "7": "7", "七": "7", "柒": "7", "拐": "7",
+        "8": "8", "八": "8", "捌": "8",
+        "9": "9", "九": "9", "玖": "9",
+    }
+    compact = re.sub(r"[\s\W_]+", "", str(text or "").lower(), flags=re.UNICODE)
+    return "".join(digit_aliases.get(char, char) for char in compact)
 
 
 def try_transcribe_audio(raw_bytes, content_type, filename, requested_language=None):
