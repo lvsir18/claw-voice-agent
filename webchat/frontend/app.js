@@ -60,7 +60,7 @@
       speakerEnrollRecording: false,
       speakerEnrollOpen: false,
       speakerEnrollSamples: [],
-      speakerEnrollTargetSamples: 3,
+      speakerEnrollTargetSamples: 2,
       speakerEnrollLevel: 0,
       lastSpeakerScore: null,
       lastSpeakerResult: "",
