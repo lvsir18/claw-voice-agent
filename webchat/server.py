@@ -1725,20 +1725,34 @@ def normalize_chinese_text(text):
 
 
 def normalize_wake_text(text):
-    digit_aliases = {
-        "0": "0", "零": "0", "〇": "0", "洞": "0",
-        "1": "1", "一": "1", "壹": "1", "幺": "1",
-        "2": "2", "二": "2", "贰": "2", "两": "2", "俩": "2",
-        "3": "3", "三": "3", "叁": "3",
-        "4": "4", "四": "4", "肆": "4",
-        "5": "5", "五": "5", "伍": "5",
-        "6": "6", "六": "6", "陆": "6",
-        "7": "7", "七": "7", "柒": "7", "拐": "7",
-        "8": "8", "八": "8", "捌": "8",
-        "9": "9", "九": "9", "玖": "9",
+    phonetic_aliases = {
+        "0": "dong", "零": "dong", "〇": "dong", "洞": "dong",
+        "动": "dong", "動": "dong", "栋": "dong", "棟": "dong", "冬": "dong", "冻": "dong",
+        "1": "yao", "幺": "yao", "妖": "yao", "腰": "yao", "要": "yao",
+        "2": "liang", "两": "liang", "俩": "liang", "辆": "liang",
+        "3": "san", "三": "san", "叁": "san", "山": "san",
+        "4": "si", "四": "si", "肆": "si", "是": "si", "寺": "si",
+        "5": "wu", "五": "wu", "伍": "wu", "物": "wu",
+        "6": "liu", "六": "liu", "陆": "liu", "溜": "liu",
+        "7": "guai", "拐": "guai", "怪": "guai",
+        "8": "ba", "八": "ba", "捌": "ba",
+        "9": "jiu", "九": "jiu", "玖": "jiu",
     }
+    try:
+        from pypinyin import lazy_pinyin
+    except Exception:
+        lazy_pinyin = None
     compact = re.sub(r"[\s\W_]+", "", str(text or "").lower(), flags=re.UNICODE)
-    return "".join(digit_aliases.get(char, char) for char in compact)
+    tokens = []
+    for char in compact:
+        mapped = phonetic_aliases.get(char)
+        if mapped is not None:
+            tokens.append(mapped)
+        elif lazy_pinyin is not None and "\u4e00" <= char <= "\u9fff":
+            tokens.extend(lazy_pinyin(char, errors="default"))
+        else:
+            tokens.append(char)
+    return "".join(tokens)
 
 
 def try_transcribe_audio(raw_bytes, content_type, filename, requested_language=None):
