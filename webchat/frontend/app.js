@@ -49,6 +49,7 @@
       wakePending: false,
       wakeChunkBuffers: [],
       wakeChunkSamples: 0,
+      wakeSamplesSinceLastCheck: 0,
       wakeChunkSampleRate: 16000,
       wakeProcessor: null,
       wakeSilentGain: null,
@@ -144,8 +145,10 @@
     const AUTO_STOP_MAX_MS = 15000;
     const AUTO_STOP_SILENCE_MS = 1200;
     const AUTO_STOP_LEVEL = 0.028;
-    const WAKE_CHUNK_MS_EN = 1500;
-    const WAKE_CHUNK_MS_ZH = 3500;
+    const WAKE_WINDOW_MS_EN = 1500;
+    const WAKE_STEP_MS_EN = 500;
+    const WAKE_WINDOW_MS_ZH = 3000;
+    const WAKE_STEP_MS_ZH = 1000;
 
     function qsSession() {
       const url = new URL(window.location.href);
@@ -353,8 +356,12 @@
       return /^[\x00-\x7F]+$/.test(state.wakePhrase) ? "en" : "zh";
     }
 
-    function wakeChunkMs() {
-      return wakeLanguageCode() === "en" ? WAKE_CHUNK_MS_EN : WAKE_CHUNK_MS_ZH;
+    function wakeWindowMs() {
+      return wakeLanguageCode() === "en" ? WAKE_WINDOW_MS_EN : WAKE_WINDOW_MS_ZH;
+    }
+
+    function wakeStepMs() {
+      return wakeLanguageCode() === "en" ? WAKE_STEP_MS_EN : WAKE_STEP_MS_ZH;
     }
 
     function base64Utf8(text) {
@@ -394,22 +401,40 @@
       return new Blob([buffer], { type: "audio/wav" });
     }
 
-    function takeWakeChunk(sampleCount) {
+    function copyLatestWakeWindow(sampleCount) {
       const out = new Float32Array(sampleCount);
+      let skip = Math.max(0, state.wakeChunkSamples - sampleCount);
       let offset = 0;
-      while (offset < sampleCount && state.wakeChunkBuffers.length) {
-        const chunk = state.wakeChunkBuffers[0];
-        const n = Math.min(sampleCount - offset, chunk.length);
-        out.set(chunk.subarray(0, n), offset);
+      for (const chunk of state.wakeChunkBuffers) {
+        if (skip >= chunk.length) {
+          skip -= chunk.length;
+          continue;
+        }
+        const source = skip > 0 ? chunk.subarray(skip) : chunk;
+        const n = Math.min(sampleCount - offset, source.length);
+        out.set(source.subarray(0, n), offset);
         offset += n;
-        if (n === chunk.length) {
+        skip = 0;
+        if (offset >= sampleCount) break;
+      }
+      return out;
+    }
+
+    function trimWakeBuffers(maxSamples) {
+      let drop = Math.max(0, state.wakeChunkSamples - maxSamples);
+      while (drop > 0 && state.wakeChunkBuffers.length) {
+        const chunk = state.wakeChunkBuffers[0];
+        if (drop >= chunk.length) {
           state.wakeChunkBuffers.shift();
+          state.wakeChunkSamples -= chunk.length;
+          drop -= chunk.length;
         } else {
-          state.wakeChunkBuffers[0] = chunk.subarray(n);
+          state.wakeChunkBuffers[0] = chunk.subarray(drop);
+          state.wakeChunkSamples -= drop;
+          drop = 0;
         }
       }
-      state.wakeChunkSamples = Math.max(0, state.wakeChunkSamples - sampleCount);
-      return out;
+      state.wakeChunkSamples = Math.max(0, state.wakeChunkSamples);
     }
 
     function updateWakeUi(extra = "") {
@@ -475,6 +500,7 @@
       state.wakeSilentGain = null;
       state.wakeChunkBuffers = [];
       state.wakeChunkSamples = 0;
+      state.wakeSamplesSinceLastCheck = 0;
       if (!state.recording) {
         if (state.meterTimer) cancelAnimationFrame(state.meterTimer);
         state.meterTimer = null;
@@ -517,6 +543,7 @@
         startLevelMonitor(state.stream);
         state.wakeChunkBuffers = [];
         state.wakeChunkSamples = 0;
+        state.wakeSamplesSinceLastCheck = 0;
         state.wakeChunkSampleRate = state.monitorContext?.sampleRate || 16000;
         const processor = state.monitorContext.createScriptProcessor(4096, 1, 1);
         const silentGain = state.monitorContext.createGain();
@@ -532,6 +559,7 @@
           const chunk = new Float32Array(event.inputBuffer.getChannelData(0));
           state.wakeChunkBuffers.push(chunk);
           state.wakeChunkSamples += chunk.length;
+          state.wakeSamplesSinceLastCheck += chunk.length;
           void flushWakeChunkIfReady();
         };
         state.monitorSource.connect(processor);
@@ -757,11 +785,15 @@
     }
 
     async function flushWakeChunkIfReady() {
-      const minSamples = Math.floor(state.wakeChunkSampleRate * (wakeChunkMs() / 1000));
-      if (state.wakePending || state.wakeChunkSamples < minSamples) return;
+      const windowSamples = Math.floor(state.wakeChunkSampleRate * (wakeWindowMs() / 1000));
+      const stepSamples = Math.floor(state.wakeChunkSampleRate * (wakeStepMs() / 1000));
+      if (state.wakePending || state.wakeChunkSamples < windowSamples) return;
+      if (state.wakeSamplesSinceLastCheck < stepSamples) return;
+      state.wakeSamplesSinceLastCheck = 0;
       state.wakePending = true;
       try {
-        const samples = takeWakeChunk(minSamples);
+        const samples = copyLatestWakeWindow(windowSamples);
+        trimWakeBuffers(windowSamples);
         const wavBlob = encodeWavBlobFromFloat32(samples, state.wakeChunkSampleRate);
         const wakeResult = await checkWakeWord(wavBlob);
         if (!wakeResult) return;
