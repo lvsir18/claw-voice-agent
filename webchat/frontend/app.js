@@ -82,6 +82,8 @@
     const tokenInputEl = $("tokenInput");
     const authBtnEl = $("authBtn");
     const authStatusEl = $("authStatus");
+    const fastModeBtnEl = $("fastModeBtn");
+    const fastModeStatusEl = $("fastModeStatus");
     const sendBtn = $("sendBtn");
     const recordBtn = $("recordBtn");
     const uploadBtn = $("uploadBtn");
@@ -204,6 +206,49 @@
       const url = new URL(raw, window.location.origin);
       if (state.authToken) url.searchParams.set("token", state.authToken);
       return url.toString();
+    }
+
+    function isFastOrigin() {
+      return window.location.port === "18890" || window.location.port === "18444";
+    }
+
+    function buildFastModeUrl() {
+      const current = new URL(window.location.href);
+      const next = new URL(current.href);
+      next.protocol = current.protocol === "https:" ? "https:" : "http:";
+      next.port = current.protocol === "https:" ? "18444" : "18890";
+      if (state.session) next.searchParams.set("session", state.session);
+      const token = state.authToken || tokenInputEl.value.trim();
+      if (token) next.searchParams.set("token", token);
+      return next.toString();
+    }
+
+    function buildStandardModeUrl() {
+      const current = new URL(window.location.href);
+      const next = new URL(current.href);
+      next.protocol = current.protocol === "https:" ? "https:" : "http:";
+      next.port = current.protocol === "https:" ? "18443" : "18889";
+      if (state.session) next.searchParams.set("session", state.session);
+      const token = state.authToken || tokenInputEl.value.trim();
+      if (token) next.searchParams.set("token", token);
+      return next.toString();
+    }
+
+    function updateFastModeUi() {
+      if (!fastModeBtnEl || !fastModeStatusEl) return;
+      if (isFastOrigin()) {
+        fastModeStatusEl.textContent = "轻量模式";
+        fastModeBtnEl.textContent = "回到标准模式";
+        fastModeBtnEl.title = "切回完整 OpenClaw agent 编排链路";
+      } else {
+        fastModeStatusEl.textContent = "标准模式";
+        fastModeBtnEl.textContent = "进入轻量模式";
+        fastModeBtnEl.title = "切到直连本地 vLLM 的低延迟链路";
+      }
+    }
+
+    function switchFastMode() {
+      window.location.href = isFastOrigin() ? buildStandardModeUrl() : buildFastModeUrl();
     }
 
     function updateAuthUi() {
@@ -964,7 +1009,10 @@
       if (state.lastTts && state.lastTts.url) {
         ttsProofEl.classList.remove("hidden");
         ttsProofMetaEl.textContent = `requestId=${state.lastTts.requestId}\nvoice=${state.lastTts.voice}\nprovider=${state.lastTts.provider}\nbytes=${state.lastTts.bytes}\nfilename=${state.lastTts.filename}`;
-        ttsProofAudioEl.src = withTokenUrl(state.lastTts.url);
+        const nextTtsSrc = withTokenUrl(state.lastTts.url);
+        if (ttsProofAudioEl.src !== nextTtsSrc) {
+          ttsProofAudioEl.src = nextTtsSrc;
+        }
       } else {
         ttsProofEl.classList.add("hidden");
         ttsProofMetaEl.textContent = "";
@@ -1231,6 +1279,21 @@
         if (ttsProofAudioEl) {
           ttsProofAudioEl.pause();
           ttsProofAudioEl.currentTime = 0;
+          ttsProofAudioEl.load();
+          await new Promise((resolve) => {
+            if (Number.isFinite(ttsProofAudioEl.duration) && ttsProofAudioEl.duration > 0) {
+              resolve();
+              return;
+            }
+            const done = () => {
+              ttsProofAudioEl.removeEventListener("loadedmetadata", done);
+              ttsProofAudioEl.removeEventListener("canplay", done);
+              resolve();
+            };
+            ttsProofAudioEl.addEventListener("loadedmetadata", done, { once: true });
+            ttsProofAudioEl.addEventListener("canplay", done, { once: true });
+            setTimeout(done, 1200);
+          });
           void ttsProofAudioEl.play().then(() => {
             if (state.wakeEnabled) updateWakeUi("回复播放中，结束后自动回到待机");
           }).catch(() => {
@@ -1446,6 +1509,7 @@
     recordBtn.addEventListener("click", () => startRecording());
     uploadBtn.addEventListener("click", () => audioInput.click());
     authBtnEl.addEventListener("click", () => connectWithToken(tokenInputEl.value));
+    if (fastModeBtnEl) fastModeBtnEl.addEventListener("click", switchFastMode);
     tokenInputEl.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
         event.preventDefault();
@@ -1582,6 +1646,7 @@
     tokenInputEl.value = initialToken;
     renderInputLevel();
     updateAuthUi();
+    updateFastModeUi();
     updateWakeUi();
     updateSpeakerUi();
     renderSpeakerEnrollModal();
